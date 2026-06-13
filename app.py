@@ -66,7 +66,7 @@ def inject_css() -> None:
         """
 <style>
 :root {
-  --bg-0: #070b14;
+  --bg-0: #0f172a;
   --bg-1: #0b1220;
   --glass: rgba(15, 23, 42, 0.72);
   --glass-soft: rgba(255, 255, 255, 0.055);
@@ -140,7 +140,7 @@ h1, h2, h3 {
 .hero-subtitle {
   max-width: 860px;
   color: #b6c2d2;
-  font-size: 1.05rem;
+  font-size: 1.4rem;
   line-height: 1.65;
 }
 
@@ -157,7 +157,7 @@ h1, h2, h3 {
   background: rgba(14, 165, 233, 0.10);
   padding: 0.48rem 0.8rem;
   border-radius: 999px;
-  font-size: 0.82rem;
+  font-size: 1rem;
 }
 
 .glass-card {
@@ -178,6 +178,7 @@ h1, h2, h3 {
 
 .glass-card p {
   color: var(--muted);
+  font-size: 1rem;
   line-height: 1.55;
   margin: 0;
 }
@@ -251,6 +252,7 @@ h1, h2, h3 {
 
 code {
   color: #bae6fd !important;
+  font-size: 1.05rem;
 }
 
 hr {
@@ -282,16 +284,19 @@ def dependency_warning() -> None:
         )
 
 
-def render_hero() -> None:
+def render_hero(presentation_mode: bool = False) -> None:
+    subtitle = (
+        "Compara detectores YOLO en tu hardware local."
+        if presentation_mode
+        else "Compara detectores YOLO por latencia, FPS y costo computacional en tu hardware local."
+    )
     st.markdown(
-        """
+        f"""
 <div class="hero">
   <div class="hero-kicker">Laboratorio local de complejidad computacional</div>
   <div class="hero-title">YOLO Complexity Lab</div>
   <div class="hero-subtitle">
-    Compara detectores de objetos por tiempo de ejecución y costo computacional. El foco no es la precisión del dataset,
-    sino cuánto tarda cada familia de modelo y qué parte de su arquitectura explica ese costo.
-    Este laboratorio mide complejidad computacional, no exactitud (mAP).
+    {subtitle}
   </div>
   <div class="hero-actions">
     <span class="pill">Latencia por frame</span>
@@ -363,9 +368,14 @@ def source_frames(source_kind: str, total_needed: int, imgsz: int) -> tuple[list
     return repeat_frame(frame, total_needed), frame
 
 
-def metric_cards(df: pd.DataFrame) -> None:
+def metric_cards(df: pd.DataFrame, presentation_mode: bool = False) -> None:
     if df.empty:
         return
+    if presentation_mode:
+        st.markdown(
+            "<style>[data-testid=\"stMetric\"] { padding: 1.8rem; }</style>",
+            unsafe_allow_html=True,
+        )
     fastest = df.sort_values("latency_mean_ms").iloc[0]
     lightest = df.sort_values("parameters_millions", na_position="last").iloc[0]
     most_fps = df.sort_values("fps_effective", ascending=False).iloc[0]
@@ -398,7 +408,7 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
         color="family",
         color_discrete_map=color_map,
         template=template,
-        title="Latencia media por modelo: menor es mejor",
+        title="Latencia por modelo",
         labels={"latency_mean_ms": "Latencia media (ms)", "model": "Modelo"},
     )
     latency_fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis_tickangle=-18)
@@ -412,7 +422,7 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
         color="family",
         color_discrete_map=color_map,
         template=template,
-        title="FPS efectivo por modelo: mayor es mejor",
+        title="FPS efectivo",
         labels={"fps_effective": "FPS", "model": "Modelo"},
     )
     fps_fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis_tickangle=-18)
@@ -428,7 +438,7 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
         color_discrete_map=color_map,
         hover_name="model",
         template=template,
-        title="Complejidad aproximada frente a tiempo real local",
+        title="Complejidad vs tiempo real",
         labels={"gflops_approx": "GFLOPs aproximados", "latency_mean_ms": "Latencia media (ms)"},
     )
     complexity_fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
@@ -489,23 +499,24 @@ def render_config_summary(
     warmup_frames: int,
     measure_frames: int,
     include_complexity: bool,
+    presentation_mode: bool = False,
 ) -> None:
     model_names = ", ".join(MODEL_CATALOG[key].display_name for key in selected_models) if selected_models else "Sin modelos"
-    st.markdown(
-        f"""
+    if presentation_mode:
+        st.caption(f"Modelos: {model_names} | Fuente: {source_kind} | Dispositivo: {device} | {imgsz}×{imgsz} | Warmup: {warmup_frames} | Medidos: {measure_frames}")
+    else:
+        st.markdown(
+            f"""
 <div class="glass-card card-accent-violet">
   <span class="small-label">Configuración actual</span>
-  <p><strong>Modelos:</strong> {model_names}</p>
-  <p><strong>Fuente:</strong> {source_kind} &nbsp; | &nbsp; <strong>Dispositivo:</strong> {device}</p>
-  <p><strong>Resolución:</strong> {imgsz} × {imgsz} &nbsp; | &nbsp; <strong>Warmup:</strong> {warmup_frames} &nbsp; | &nbsp; <strong>Medidos:</strong> {measure_frames}</p>
-  <p><strong>MACs/GFLOPs:</strong> {'activado' if include_complexity else 'desactivado'}</p>
+  <p>Modelos: {model_names} | Fuente: {source_kind} | Dispositivo: {device} | {imgsz}×{imgsz} | Warmup: {warmup_frames} | Medidos: {measure_frames}</p>
 </div>
-        """,
-        unsafe_allow_html=True,
-    )
+            """,
+            unsafe_allow_html=True,
+        )
 
 
-def render_result_interpretation(df: pd.DataFrame) -> None:
+def render_result_interpretation(df: pd.DataFrame, presentation_mode: bool = False) -> None:
     if df.empty:
         return
     fastest = df.sort_values("latency_mean_ms").iloc[0]
@@ -520,21 +531,32 @@ def render_result_interpretation(df: pd.DataFrame) -> None:
     else:
         complexity_sentence = "No se calculó GFLOPs en esta corrida."
 
+    if presentation_mode:
+        bullets = [
+            f"<li>Menor latencia: <strong>{fastest['model']}</strong> — {fastest['latency_mean_ms']} ms por frame.</li>",
+            f"<li>Mayor FPS: <strong>{highest_fps['model']}</strong> — {highest_fps['fps_effective']} FPS.</li>",
+            f"<li>{complexity_sentence} La conclusión cruza teoría, GFLOPs y tiempo real.</li>",
+        ]
+        body = "<ul>" + "".join(bullets) + "</ul>"
+    else:
+        body = (
+            f"<p>Menor latencia: <strong>{fastest['model']}</strong> — {fastest['latency_mean_ms']} ms por frame.</p>\n"
+            f"<p>Mayor FPS: <strong>{highest_fps['model']}</strong> — {highest_fps['fps_effective']} FPS.</p>\n"
+            f"<p>{complexity_sentence} La conclusión cruza teoría, GFLOPs y tiempo real.</p>"
+        )
+
     st.markdown(
         f"""
 <div class="glass-card card-accent-green">
   <span class="small-label">Interpretación para explicar en clase</span>
-  <p>En esta máquina, el modelo con menor latencia media fue <strong>{fastest['model']}</strong> con <strong>{fastest['latency_mean_ms']} ms</strong> por frame.</p>
-  <p>El mayor FPS efectivo fue <strong>{highest_fps['model']}</strong> con <strong>{highest_fps['fps_effective']} FPS</strong>.</p>
-  <p>{complexity_sentence}</p>
-  <p>La conclusión correcta no sale solo de Big-O: se cruza complejidad teórica, GFLOPs aproximados y tiempo real medido.</p>
+  {body}
 </div>
         """,
         unsafe_allow_html=True,
     )
 
 
-def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None) -> None:
+def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, presentation_mode: bool = False) -> None:
     """Render persisted benchmark results and export actions.
 
     Streamlit reruns the script whenever a button, checkbox or download action is
@@ -544,8 +566,8 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None) -> N
     if df.empty:
         return
 
-    metric_cards(df)
-    render_result_interpretation(df)
+    metric_cards(df, presentation_mode)
+    render_result_interpretation(df, presentation_mode)
 
     st.markdown("<h3 class='section-title'>Tabla completa</h3>", unsafe_allow_html=True)
     st.dataframe(df, width="stretch", hide_index=True)
@@ -583,8 +605,9 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None) -> N
             key="download_html_zip",
             on_click="ignore",
         )
-        for path in st.session_state.get("last_html_paths", []):
-            st.write(f"Gráfico exportado: `{path}`")
+        if not presentation_mode:
+            for path in st.session_state.get("last_html_paths", []):
+                st.write(f"Gráfico exportado: `{path}`")
 
 
 def render_controls_guide() -> None:
@@ -616,7 +639,7 @@ def render_controls_guide() -> None:
 
 inject_css()
 dependency_warning()
-render_hero()
+render_hero(st.session_state.get("presentation_mode", False))
 
 with st.sidebar:
     st.markdown("### Configuración del benchmark")
@@ -685,6 +708,8 @@ with st.sidebar:
             help="Activa un forward adicional para estimar operaciones de Conv2d y Linear. Puede tardar un poco más.",
         )
 
+        st.toggle("Modo presentación", value=False, key="presentation_mode")
+
 inicio_tab, benchmark_tab, teoria_tab = st.tabs(
     ["Inicio", "Benchmark", "Teoría"]
 )
@@ -696,8 +721,6 @@ with inicio_tab:
     render_explanation_flow()
     st.markdown("<h2 class='section-title'>Cómo leer los resultados</h2>", unsafe_allow_html=True)
     render_metric_glossary()
-    st.markdown("<h2 class='section-title'>Catálogo de modelos</h2>", unsafe_allow_html=True)
-    st.dataframe(pd.DataFrame(catalog_rows()), width="stretch", hide_index=True)
 
 with teoria_tab:
     st.markdown("<h2 class='section-title'>Parámetro específico de complejidad</h2>", unsafe_allow_html=True)
@@ -736,10 +759,14 @@ La lectura práctica es directa: si sube la resolución, sube `n`; si suben cana
         "Big-O explica crecimiento teórico. Latencia, FPS y GFLOPs muestran lo que realmente ocurre en esta máquina."
     )
 
-    with st.expander("Guía de controles"):
+    st.markdown("<h2 class='section-title'>Catálogo de modelos</h2>", unsafe_allow_html=True)
+    if not st.session_state.get("presentation_mode", False):
+        st.dataframe(pd.DataFrame(catalog_rows()), width="stretch", hide_index=True)
+
+    with st.expander("Guía de controles", expanded=not st.session_state.get("presentation_mode", False)):
         render_controls_guide()
 
-    with st.expander("Sistema y exportación"):
+    with st.expander("Sistema y exportación", expanded=not st.session_state.get("presentation_mode", False)):
         st.markdown("<h2 class='section-title'>Hardware y entorno local</h2>", unsafe_allow_html=True)
         st.write("Estos datos importan porque el benchmark no es universal: depende del equipo donde se ejecuta.")
         st.json(system_info_dict())
@@ -747,7 +774,8 @@ La lectura práctica es directa: si sube la resolución, sube `n`; si suben cana
 
 with benchmark_tab:
     st.markdown("<h2 class='section-title'>Ejecución del benchmark</h2>", unsafe_allow_html=True)
-    render_config_summary(selected_models, source_kind, device, int(imgsz), int(warmup_frames), int(measure_frames), include_complexity)
+    pm = st.session_state.get("presentation_mode", False)
+    render_config_summary(selected_models, source_kind, device, int(imgsz), int(warmup_frames), int(measure_frames), include_complexity, pm)
     run = st.button("Ejecutar benchmark", type="primary")
     total_needed = int(warmup_frames + measure_frames)
 
@@ -758,22 +786,21 @@ with benchmark_tab:
         frames_to_load = total_needed if run else 1
         frames, preview = source_frames(source_kind, frames_to_load, imgsz)
 
-    preview_col, explanation_col = st.columns([0.85, 1.15])
+    if pm:
+        preview_col = st.columns(1)[0]
+    else:
+        preview_col, explanation_col = st.columns([1.2, 0.8])
     with preview_col:
         if preview is not None:
             st.image(preview, caption="Vista previa del input", channels="RGB", width="stretch")
-    with explanation_col:
-        render_card(
-            "Qué pasará al ejecutar",
-            "La app carga cada modelo seleccionado, realiza frames de calentamiento, mide los frames configurados y exporta un CSV con latencia, FPS, parámetros, GFLOPs y Big-O.",
-            "blue",
-        )
-        st.write("")
-        render_card(
-            "Comparación justa",
-            "Todos los modelos usan la misma fuente, resolución y cantidad de frames. Si cambia la resolución, cambia el costo n = H × W.",
-            "green",
-        )
+    if not pm:
+        with explanation_col:
+            st.markdown(
+                "<p style='color: var(--muted); padding-top: 0.5rem;'>"
+                "Ejecuta el benchmark para ver los resultados. Todos los modelos "
+                "usan la misma fuente, resolución y cantidad de frames.</p>",
+                unsafe_allow_html=True,
+            )
 
     if run:
         if not selected_models:
@@ -796,7 +823,10 @@ with benchmark_tab:
 
         for index, model_key in enumerate(selected_models, start=1):
             spec = MODEL_CATALOG[model_key]
-            status.write(f"Cargando y midiendo: **{spec.display_name}**")
+            if pm:
+                status.markdown(f"## Cargando: Modelo {index} de {len(selected_models)}")
+            else:
+                status.write(f"Cargando y midiendo: **{spec.display_name}**")
             try:
                 loaded = cached_load_model(model_key, device)
                 row = benchmark_model(loaded, frames, config, include_complexity=include_complexity)
@@ -812,14 +842,16 @@ with benchmark_tab:
             st.session_state["last_benchmark_csv_path"] = str(export_path)
             st.session_state.pop("last_html_zip", None)
             st.session_state.pop("last_html_paths", None)
-            render_benchmark_results(df, str(export_path))
+            render_benchmark_results(df, str(export_path), st.session_state.get("presentation_mode", False))
         else:
             st.warning("No se pudo medir ningún modelo. Revisa dependencias, conexión o disponibilidad de pesos.")
     elif "last_benchmark_df" in st.session_state:
+        pm = st.session_state.get("presentation_mode", False)
         st.info("Mostrando el último benchmark ejecutado. Puedes descargar CSV/HTML sin volver a medir.")
         render_benchmark_results(
             st.session_state["last_benchmark_df"],
             st.session_state.get("last_benchmark_csv_path"),
+            pm,
         )
     else:
         st.info("Ejecuta el benchmark para generar tabla, gráficos y descargas.")
