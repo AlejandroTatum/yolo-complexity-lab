@@ -89,6 +89,8 @@ O(Σ conv + R × C_roi + NMS)
 
 ## Exportación
 
+Los resultados quedan persistidos en la sesión de Streamlit. Podés descargar CSV o preparar gráficos HTML sin perder la tabla ni repetir el benchmark.
+
 Los CSV se guardan automáticamente en:
 
 ```text

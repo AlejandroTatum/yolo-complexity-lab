@@ -15,7 +15,7 @@ import streamlit as st
 
 from yolo_complexity_lab.benchmark import BenchmarkConfig, benchmark_model
 from yolo_complexity_lab.catalog import MODEL_CATALOG, catalog_rows
-from yolo_complexity_lab.exporting import write_plot_html, write_results_csv
+from yolo_complexity_lab.exporting import build_plot_html_zip, write_plot_html, write_results_csv
 from yolo_complexity_lab.loaders import load_model
 from yolo_complexity_lab.paths import default_export_dir
 from yolo_complexity_lab.sources import (
@@ -401,7 +401,7 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
         labels={"latency_mean_ms": "Latencia media (ms)", "model": "Modelo"},
     )
     latency_fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis_tickangle=-18)
-    st.plotly_chart(latency_fig, use_container_width=True)
+    st.plotly_chart(latency_fig, width="stretch")
     plots.append(("latencia_media", latency_fig))
 
     fps_fig = px.bar(
@@ -415,7 +415,7 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
         labels={"fps_effective": "FPS", "model": "Modelo"},
     )
     fps_fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis_tickangle=-18)
-    st.plotly_chart(fps_fig, use_container_width=True)
+    st.plotly_chart(fps_fig, width="stretch")
     plots.append(("fps_efectivo", fps_fig))
 
     complexity_fig = px.scatter(
@@ -431,7 +431,7 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
         labels={"gflops_approx": "GFLOPs aproximados", "latency_mean_ms": "Latencia media (ms)"},
     )
     complexity_fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-    st.plotly_chart(complexity_fig, use_container_width=True)
+    st.plotly_chart(complexity_fig, width="stretch")
     plots.append(("gflops_vs_latencia", complexity_fig))
     return plots
 
@@ -531,6 +531,59 @@ def render_result_interpretation(df: pd.DataFrame) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None) -> None:
+    """Render persisted benchmark results and export actions.
+
+    Streamlit reruns the script whenever a button, checkbox or download action is
+    used. Keeping rendering in this helper lets us show the last benchmark from
+    st.session_state instead of losing it after export actions.
+    """
+    if df.empty:
+        return
+
+    metric_cards(df)
+    render_result_interpretation(df)
+
+    st.markdown("<h3 class='section-title'>Tabla completa</h3>", unsafe_allow_html=True)
+    st.dataframe(df, width="stretch", hide_index=True)
+
+    st.markdown("<h3 class='section-title'>Gráficos</h3>", unsafe_allow_html=True)
+    plots = plot_results(df)
+
+    if csv_path:
+        st.success(f"CSV exportado en: {csv_path}")
+
+    csv_bytes = df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Descargar resultados CSV",
+        csv_bytes,
+        file_name="benchmark_yolo_complexity.csv",
+        mime="text/csv",
+        key="download_results_csv",
+        on_click="ignore",
+    )
+
+    st.markdown("<h3 class='section-title'>Exportación HTML</h3>", unsafe_allow_html=True)
+    st.caption("Sirve para guardar los gráficos interactivos y compartirlos sin volver a ejecutar el benchmark.")
+
+    if st.button("Preparar gráficos HTML", key="prepare_html_export"):
+        exported_paths = [write_plot_html(fig, name) for name, fig in plots]
+        st.session_state["last_html_zip"] = build_plot_html_zip(plots)
+        st.session_state["last_html_paths"] = [str(path) for path in exported_paths]
+
+    if st.session_state.get("last_html_zip"):
+        st.download_button(
+            "Descargar gráficos HTML (.zip)",
+            st.session_state["last_html_zip"],
+            file_name="graficos_yolo_complexity_lab.zip",
+            mime="application/zip",
+            key="download_html_zip",
+            on_click="ignore",
+        )
+        for path in st.session_state.get("last_html_paths", []):
+            st.write(f"Gráfico exportado: `{path}`")
 
 
 def render_controls_guide() -> None:
@@ -677,7 +730,7 @@ with intro_tab:
     st.markdown("<h2 class='section-title'>Cómo leer los resultados</h2>", unsafe_allow_html=True)
     render_metric_glossary()
     st.markdown("<h2 class='section-title'>Catálogo de modelos</h2>", unsafe_allow_html=True)
-    st.dataframe(pd.DataFrame(catalog_rows()), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(catalog_rows()), width="stretch", hide_index=True)
 
 with theory_tab:
     st.markdown("<h2 class='section-title'>Parámetro específico de complejidad</h2>", unsafe_allow_html=True)
@@ -740,7 +793,7 @@ with benchmark_tab:
     preview_col, explanation_col = st.columns([0.85, 1.15])
     with preview_col:
         if preview is not None:
-            st.image(preview, caption="Vista previa del input", channels="RGB", use_container_width=True)
+            st.image(preview, caption="Vista previa del input", channels="RGB", width="stretch")
     with explanation_col:
         render_card(
             "Qué pasará al ejecutar",
@@ -786,19 +839,19 @@ with benchmark_tab:
 
         if rows:
             df = pd.DataFrame(rows)
-            metric_cards(df)
-            render_result_interpretation(df)
-            st.markdown("<h3 class='section-title'>Tabla completa</h3>", unsafe_allow_html=True)
-            st.dataframe(df, use_container_width=True, hide_index=True)
-            st.markdown("<h3 class='section-title'>Gráficos</h3>", unsafe_allow_html=True)
-            plots = plot_results(df)
             export_path = write_results_csv(df)
-            st.success(f"CSV exportado en: {export_path}")
-            csv_bytes = df.to_csv(index=False).encode("utf-8")
-            st.download_button("Descargar CSV", csv_bytes, file_name=export_path.name, mime="text/csv")
-            if st.checkbox("Exportar gráficos como HTML", value=False):
-                exported = [write_plot_html(fig, name) for name, fig in plots]
-                for path in exported:
-                    st.write(f"Gráfico exportado: `{path}`")
+            st.session_state["last_benchmark_df"] = df
+            st.session_state["last_benchmark_csv_path"] = str(export_path)
+            st.session_state.pop("last_html_zip", None)
+            st.session_state.pop("last_html_paths", None)
+            render_benchmark_results(df, str(export_path))
         else:
             st.warning("No se pudo medir ningún modelo. Revisa dependencias, conexión o disponibilidad de pesos.")
+    elif "last_benchmark_df" in st.session_state:
+        st.info("Mostrando el último benchmark ejecutado. Puedes descargar CSV/HTML sin volver a medir.")
+        render_benchmark_results(
+            st.session_state["last_benchmark_df"],
+            st.session_state.get("last_benchmark_csv_path"),
+        )
+    else:
+        st.info("Ejecuta el benchmark para generar tabla, gráficos y descargas.")

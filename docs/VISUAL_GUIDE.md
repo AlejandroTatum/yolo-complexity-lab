@@ -42,6 +42,7 @@ docs/VISUAL_GUIDE.md      # guía para colaboradores
 - Captions visibles debajo de controles críticos.
 - Gráficos Plotly con paleta consistente.
 - Tab dedicado para explicar controles.
+- Descarga HTML persistente: exportar gráficos ya no borra el benchmark.
 
 ## Próximas mejoras posibles
 
