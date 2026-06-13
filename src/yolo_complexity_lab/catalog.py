@@ -48,7 +48,9 @@ MODEL_CATALOG: dict[str, ModelSpec] = {
         postprocess_big_o=NMS_BIG_O,
         complexity_note=(
             "Detector de una etapa: predice cajas y clases en una sola pasada. "
-            "El costo dominante viene de convoluciones; NMS agrega costo cuadrático "
+            "Usa backbone CSP (Cross Stage Partial), es anchor-free e incluye "
+            "mecanismos de atención en el cuello (Neck) desde YOLOv10. El costo "
+            "dominante viene de convoluciones; NMS agrega costo cuadrático "
             "sobre cajas candidatas."
         ),
     ),

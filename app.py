@@ -50,7 +50,7 @@ DEVICE_HELP = {
 METRIC_EXPLANATIONS = {
     "Latencia": "Tiempo que tarda el modelo en procesar un frame. Menor es mejor.",
     "FPS": "Frames por segundo efectivos. Mayor es mejor para tiempo real.",
-    "GFLOPs": "Operaciones aproximadas por frame. Sirve como proxy de complejidad computacional.",
+    "GFLOPs": "Operaciones aproximadas por frame (1 MAC ≈ 2 FLOPs). Sirve como proxy de complejidad computacional.",
     "Parámetros": "Cantidad de pesos aprendidos. Afecta tamaño, memoria y capacidad del modelo.",
     "Big-O": "Describe cómo crece el costo cuando suben resolución, capas, canales o cajas candidatas.",
 }
@@ -291,6 +291,7 @@ def render_hero() -> None:
   <div class="hero-subtitle">
     Compara detectores de objetos por tiempo de ejecución y costo computacional. El foco no es la precisión del dataset,
     sino cuánto tarda cada familia de modelo y qué parte de su arquitectura explica ese costo.
+    Este laboratorio mide complejidad computacional, no exactitud (mAP).
   </div>
   <div class="hero-actions">
     <span class="pill">Latencia por frame</span>

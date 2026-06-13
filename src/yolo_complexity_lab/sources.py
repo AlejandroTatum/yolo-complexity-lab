@@ -34,6 +34,9 @@ def read_image_file(file: BinaryIO | str | Path):
 
 
 def frames_from_video(path: str | Path, limit: int, stride: int = 1) -> list[object]:
+    if stride < 1:
+        return []
+
     import cv2
 
     cap = cv2.VideoCapture(str(path))
@@ -44,7 +47,7 @@ def frames_from_video(path: str | Path, limit: int, stride: int = 1) -> list[obj
             ok, frame_bgr = cap.read()
             if not ok:
                 break
-            if index % max(1, stride) == 0:
+            if index % stride == 0:
                 frames.append(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
             index += 1
     finally:

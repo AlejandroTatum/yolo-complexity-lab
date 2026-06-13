@@ -4,7 +4,7 @@ App local en Streamlit para comparar **tiempo de ejecución** y **complejidad co
 
 ## Enfoque
 
-El recurso no intenta demostrar mAP. Se centra en:
+El recurso no intenta demostrar mAP (Mean Average Precision). El foco exclusivo es la complejidad computacional y el tiempo de ejecución local. Se centra en:
 
 - Latencia media, mediana, mínimo, máximo y p95.
 - FPS efectivo.
