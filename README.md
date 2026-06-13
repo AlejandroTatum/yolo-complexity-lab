@@ -29,7 +29,9 @@ Si vas a pulir la parte visual/front, empezá por:
 - `.streamlit/config.toml` para colores/tema global.
 - `docs/VISUAL_GUIDE.md` para una guía rápida de mejoras visuales.
 
-No subas `.venv/`, pesos `.pt`, videos pesados ni resultados generados.
+La UI ya evita emojis, usa estilo glass, captions explicativos y una pestaña de guía de controles para que cualquier alumno entienda para qué sirve cada opción.
+
+No subas `.venv/`, pesos `.pt`, videos pesados ni resultados generados. Los pesos YOLO se guardan fuera del repo en `~/.cache/yolo-complexity-lab/weights/`.
 
 ## Instalación recomendada
 

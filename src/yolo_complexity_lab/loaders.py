@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Any
 
@@ -66,7 +67,19 @@ def load_model(spec_key: str, requested_device: str = "auto") -> LoadedModel:
     if spec.backend == "ultralytics":
         from ultralytics import YOLO
 
-        yolo = YOLO(spec.weight_name)
+        # Keep downloaded YOLO weights outside the repository. Ultralytics
+        # downloads known assets into the current working directory when given
+        # a short name like yolo11n.pt, so temporarily switch to a cache dir.
+        weights_dir = Path.home() / ".cache" / "yolo-complexity-lab" / "weights"
+        weights_dir.mkdir(parents=True, exist_ok=True)
+        expected_weight_path = weights_dir / spec.weight_name
+        previous_cwd = Path.cwd()
+        try:
+            os.chdir(weights_dir)
+            yolo = YOLO(str(expected_weight_path if expected_weight_path.exists() else spec.weight_name))
+        finally:
+            os.chdir(previous_cwd)
+
         try:
             yolo.to(device)
         except Exception:
@@ -74,7 +87,7 @@ def load_model(spec_key: str, requested_device: str = "auto") -> LoadedModel:
             pass
         inner = getattr(yolo, "model", None)
         params = _count_parameters(inner) if inner is not None else None
-        ckpt_path = getattr(yolo, "ckpt_path", None) or spec.weight_name
+        ckpt_path = getattr(yolo, "ckpt_path", None) or expected_weight_path
         size = _file_size_mb(ckpt_path)
         size_note = f"Tamaño del archivo de pesos: {ckpt_path}" if size else "Tamaño estimado desde parámetros."
         if size is None:
