@@ -1,0 +1,11 @@
+streamlit>=1.36
+ultralytics>=8.3
+opencv-python>=4.9
+pandas>=2.2
+plotly>=5.22
+psutil>=5.9
+numpy>=1.26
+torch>=2.3
+torchvision>=0.18
+# Opcional: la app usa un contador propio de MACs; thop queda como apoyo si querés extenderla.
+thop>=0.1.1
