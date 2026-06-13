@@ -605,9 +605,7 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, pres
             key="download_html_zip",
             on_click="ignore",
         )
-        if not presentation_mode:
-            for path in st.session_state.get("last_html_paths", []):
-                st.write(f"Gráfico exportado: `{path}`")
+        pass
 
 
 def render_controls_guide() -> None:
@@ -639,7 +637,7 @@ def render_controls_guide() -> None:
 
 inject_css()
 dependency_warning()
-render_hero(st.session_state.get("presentation_mode", False))
+render_hero(True)
 
 with st.sidebar:
     st.markdown("### Configuración del benchmark")
@@ -708,7 +706,7 @@ with st.sidebar:
             help="Activa un forward adicional para estimar operaciones de Conv2d y Linear. Puede tardar un poco más.",
         )
 
-        st.toggle("Modo presentación", value=False, key="presentation_mode")
+        pass
 
 inicio_tab, benchmark_tab, teoria_tab = st.tabs(
     ["Inicio", "Benchmark", "Teoría"]
@@ -760,13 +758,10 @@ La lectura práctica es directa: si sube la resolución, sube `n`; si suben cana
     )
 
     st.markdown("<h2 class='section-title'>Catálogo de modelos</h2>", unsafe_allow_html=True)
-    if not st.session_state.get("presentation_mode", False):
-        st.dataframe(pd.DataFrame(catalog_rows()), width="stretch", hide_index=True)
-
-    with st.expander("Guía de controles", expanded=not st.session_state.get("presentation_mode", False)):
+    with st.expander("Guía de controles", expanded=False):
         render_controls_guide()
 
-    with st.expander("Sistema y exportación", expanded=not st.session_state.get("presentation_mode", False)):
+    with st.expander("Sistema y exportación", expanded=False):
         st.markdown("<h2 class='section-title'>Hardware y entorno local</h2>", unsafe_allow_html=True)
         st.write("Estos datos importan porque el benchmark no es universal: depende del equipo donde se ejecuta.")
         st.json(system_info_dict())
@@ -774,8 +769,7 @@ La lectura práctica es directa: si sube la resolución, sube `n`; si suben cana
 
 with benchmark_tab:
     st.markdown("<h2 class='section-title'>Ejecución del benchmark</h2>", unsafe_allow_html=True)
-    pm = st.session_state.get("presentation_mode", False)
-    render_config_summary(selected_models, source_kind, device, int(imgsz), int(warmup_frames), int(measure_frames), include_complexity, pm)
+    render_config_summary(selected_models, source_kind, device, int(imgsz), int(warmup_frames), int(measure_frames), include_complexity, True)
     run = st.button("Ejecutar benchmark", type="primary")
     total_needed = int(warmup_frames + measure_frames)
 
@@ -786,21 +780,10 @@ with benchmark_tab:
         frames_to_load = total_needed if run else 1
         frames, preview = source_frames(source_kind, frames_to_load, imgsz)
 
-    if pm:
-        preview_col = st.columns(1)[0]
-    else:
-        preview_col, explanation_col = st.columns([1.2, 0.8])
+    preview_col = st.columns(1)[0]
     with preview_col:
         if preview is not None:
             st.image(preview, caption="Vista previa del input", channels="RGB", width="stretch")
-    if not pm:
-        with explanation_col:
-            st.markdown(
-                "<p style='color: var(--muted); padding-top: 0.5rem;'>"
-                "Ejecuta el benchmark para ver los resultados. Todos los modelos "
-                "usan la misma fuente, resolución y cantidad de frames.</p>",
-                unsafe_allow_html=True,
-            )
 
     if run:
         if not selected_models:
@@ -823,10 +806,7 @@ with benchmark_tab:
 
         for index, model_key in enumerate(selected_models, start=1):
             spec = MODEL_CATALOG[model_key]
-            if pm:
-                status.markdown(f"## Cargando: Modelo {index} de {len(selected_models)}")
-            else:
-                status.write(f"Cargando y midiendo: **{spec.display_name}**")
+            status.markdown(f"## Cargando: Modelo {index} de {len(selected_models)}")
             try:
                 loaded = cached_load_model(model_key, device)
                 row = benchmark_model(loaded, frames, config, include_complexity=include_complexity)
@@ -842,16 +822,15 @@ with benchmark_tab:
             st.session_state["last_benchmark_csv_path"] = str(export_path)
             st.session_state.pop("last_html_zip", None)
             st.session_state.pop("last_html_paths", None)
-            render_benchmark_results(df, str(export_path), st.session_state.get("presentation_mode", False))
+            render_benchmark_results(df, str(export_path), True)
         else:
             st.warning("No se pudo medir ningún modelo. Revisa dependencias, conexión o disponibilidad de pesos.")
     elif "last_benchmark_df" in st.session_state:
-        pm = st.session_state.get("presentation_mode", False)
         st.info("Mostrando el último benchmark ejecutado. Puedes descargar CSV/HTML sin volver a medir.")
         render_benchmark_results(
             st.session_state["last_benchmark_df"],
             st.session_state.get("last_benchmark_csv_path"),
-            pm,
+            True,
         )
     else:
         st.info("Ejecuta el benchmark para generar tabla, gráficos y descargas.")
