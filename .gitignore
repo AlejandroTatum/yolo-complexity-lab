@@ -7,3 +7,5 @@ __pycache__/
 *.csv
 *.html
 .streamlit/secrets.toml
+.workspace-review/
+.atl/

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import sys
 import tempfile
 from pathlib import Path
@@ -31,7 +32,7 @@ st.set_page_config(
     page_title="YOLO Complexity Lab",
     page_icon=None,
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 SOURCE_HELP = {
@@ -258,6 +259,49 @@ code {
 hr {
   border-color: rgba(148, 163, 184, 0.18);
 }
+
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+.stDeployButton {
+  display: none !important;
+}
+
+[data-testid="stHeader"] {
+  background: transparent;
+}
+
+.preview-frame {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 0.55rem;
+  box-shadow: 0 18px 42px rgba(0,0,0,0.20);
+}
+
+.preview-frame img {
+  width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  display: block;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.preview-caption {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-top: 0.45rem;
+}
+
+@media (max-width: 760px) {
+  .hero { padding: 1.25rem; border-radius: 22px; }
+  .hero-title { font-size: 2.45rem; }
+  .hero-subtitle { font-size: 0.95rem; }
+  .hero-actions { gap: 0.45rem; }
+  .pill { font-size: 0.74rem; padding: 0.38rem 0.62rem; }
+  .preview-frame img { max-height: 260px; }
+}
 </style>
         """,
         unsafe_allow_html=True,
@@ -368,6 +412,54 @@ def source_frames(source_kind: str, total_needed: int, imgsz: int) -> tuple[list
     return repeat_frame(frame, total_needed), frame
 
 
+def render_preview_image(frame: object, caption: str = "Vista previa del input") -> None:
+    """Render a compact full-image preview with object-fit containment."""
+    try:
+        import cv2
+
+        success, encoded = cv2.imencode(".png", frame)
+        if not success:
+            raise ValueError("No se pudo codificar la imagen de preview.")
+        b64 = base64.b64encode(encoded.tobytes()).decode("ascii")
+        st.markdown(
+            f"""
+<div class="preview-frame">
+  <img src="data:image/png;base64,{b64}" alt="{caption}" />
+  <div class="preview-caption">{caption}</div>
+</div>
+            """,
+            unsafe_allow_html=True,
+        )
+    except Exception:
+        st.image(frame, caption=caption, channels="RGB", width="stretch")
+
+
+def compact_results_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a student-friendly summary before the technical table."""
+    columns = [
+        "model",
+        "family",
+        "latency_mean_ms",
+        "fps_effective",
+        "gflops_approx",
+        "parameters_millions",
+        "big_o_postprocess",
+    ]
+    available = [col for col in columns if col in df.columns]
+    summary = df[available].copy()
+    return summary.rename(
+        columns={
+            "model": "Modelo",
+            "family": "Familia",
+            "latency_mean_ms": "Latencia media (ms)",
+            "fps_effective": "FPS",
+            "gflops_approx": "GFLOPs aprox.",
+            "parameters_millions": "Parámetros (M)",
+            "big_o_postprocess": "Postproceso Big-O",
+        }
+    )
+
+
 def metric_cards(df: pd.DataFrame, presentation_mode: bool = False) -> None:
     if df.empty:
         return
@@ -400,6 +492,13 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
         "CNN two-stage": "#fbbf24",
     }
     template = "plotly_dark"
+    common_layout = dict(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=24, r=16, t=48, b=70),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        height=330,
+    )
 
     latency_fig = px.bar(
         df,
@@ -409,10 +508,12 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
         color_discrete_map=color_map,
         template=template,
         title="Latencia por modelo",
-        labels={"latency_mean_ms": "Latencia media (ms)", "model": "Modelo"},
+        labels={"latency_mean_ms": "ms", "model": ""},
+        text="latency_mean_ms",
     )
-    latency_fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis_tickangle=-18)
-    st.plotly_chart(latency_fig, width="stretch")
+    latency_fig.update_layout(**common_layout)
+    latency_fig.update_traces(texttemplate="%{text:.1f} ms", textposition="outside", cliponaxis=False)
+    latency_fig.update_xaxes(tickangle=-12)
     plots.append(("latencia_media", latency_fig))
 
     fps_fig = px.bar(
@@ -423,10 +524,12 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
         color_discrete_map=color_map,
         template=template,
         title="FPS efectivo",
-        labels={"fps_effective": "FPS", "model": "Modelo"},
+        labels={"fps_effective": "FPS", "model": ""},
+        text="fps_effective",
     )
-    fps_fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis_tickangle=-18)
-    st.plotly_chart(fps_fig, width="stretch")
+    fps_fig.update_layout(**common_layout)
+    fps_fig.update_traces(texttemplate="%{text:.1f}", textposition="outside", cliponaxis=False)
+    fps_fig.update_xaxes(tickangle=-12)
     plots.append(("fps_efectivo", fps_fig))
 
     complexity_fig = px.scatter(
@@ -441,9 +544,15 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
         title="Complejidad vs tiempo real",
         labels={"gflops_approx": "GFLOPs aproximados", "latency_mean_ms": "Latencia media (ms)"},
     )
-    complexity_fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-    st.plotly_chart(complexity_fig, width="stretch")
+    complexity_fig.update_layout(**{**common_layout, "height": 360, "margin": dict(l=48, r=16, t=48, b=54)})
     plots.append(("gflops_vs_latencia", complexity_fig))
+
+    top_left, top_right = st.columns(2)
+    with top_left:
+        st.plotly_chart(latency_fig, width="stretch", config={"displayModeBar": False})
+    with top_right:
+        st.plotly_chart(fps_fig, width="stretch", config={"displayModeBar": False})
+    st.plotly_chart(complexity_fig, width="stretch", config={"displayModeBar": False})
     return plots
 
 
@@ -569,14 +678,18 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, pres
     metric_cards(df, presentation_mode)
     render_result_interpretation(df, presentation_mode)
 
-    st.markdown("<h3 class='section-title'>Tabla completa</h3>", unsafe_allow_html=True)
-    st.dataframe(df, width="stretch", hide_index=True)
+    st.markdown("<h3 class='section-title'>Resumen comparativo</h3>", unsafe_allow_html=True)
+    st.dataframe(compact_results_table(df), width="stretch", hide_index=True)
+
+    with st.expander("Ver tabla técnica completa"):
+        st.dataframe(df, width="stretch", hide_index=True)
 
     st.markdown("<h3 class='section-title'>Gráficos</h3>", unsafe_allow_html=True)
     plots = plot_results(df)
 
     if csv_path:
-        st.success(f"CSV exportado en: {csv_path}")
+        csv_name = Path(csv_path).name
+        st.success(f"CSV guardado en results/{csv_name}")
 
     csv_bytes = df.to_csv(index=False).encode("utf-8")
     st.download_button(
@@ -769,6 +882,7 @@ La lectura práctica es directa: si sube la resolución, sube `n`; si suben cana
 
 with benchmark_tab:
     st.markdown("<h2 class='section-title'>Ejecución del benchmark</h2>", unsafe_allow_html=True)
+    st.caption("Abrí el panel lateral para cambiar modelos, fuente, dispositivo o resolución. La configuración actual se resume abajo.")
     render_config_summary(selected_models, source_kind, device, int(imgsz), int(warmup_frames), int(measure_frames), include_complexity, True)
     run = st.button("Ejecutar benchmark", type="primary")
     total_needed = int(warmup_frames + measure_frames)
@@ -783,7 +897,7 @@ with benchmark_tab:
     preview_col = st.columns(1)[0]
     with preview_col:
         if preview is not None:
-            st.image(preview, caption="Vista previa del input", channels="RGB", width="stretch")
+            render_preview_image(preview, "Vista previa del input")
 
     if run:
         if not selected_models:
@@ -814,6 +928,9 @@ with benchmark_tab:
             except Exception as exc:
                 st.error(f"Falló {spec.display_name}: {exc}")
             progress.progress(index / len(selected_models))
+
+        status.empty()
+        progress.empty()
 
         if rows:
             df = pd.DataFrame(rows)
