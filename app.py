@@ -620,7 +620,6 @@ render_hero()
 
 with st.sidebar:
     st.markdown("### Configuración del benchmark")
-    st.caption("Elegí qué modelos medir, con qué entrada y en qué dispositivo. Todos se ejecutan con la misma resolución.")
 
     default_models = [key for key, spec in MODEL_CATALOG.items() if spec.default_enabled]
     selected_models = st.multiselect(
@@ -631,99 +630,66 @@ with st.sidebar:
         help="Selecciona al menos dos modelos para comparar tiempo y complejidad. YOLO11n + SSDlite es una prueba rápida.",
     )
 
-    selected_descriptions = [
-        f"{MODEL_CATALOG[key].display_name}: {MODEL_CATALOG[key].complexity_note}" for key in selected_models
-    ]
-    if selected_descriptions:
-        st.markdown("**Qué se está comparando**")
-        for text in selected_descriptions:
-            st.caption(text)
-
     source_kind = st.selectbox(
         "Fuente de frames",
         list(SOURCE_HELP.keys()),
         help="Define de dónde salen los frames usados en el benchmark.",
     )
-    st.caption(SOURCE_HELP[source_kind])
 
     if source_kind == "Webcam OpenCV local":
         st.number_input("Índice de cámara", min_value=0, max_value=5, value=0, key="camera_index")
 
     device = st.selectbox("Dispositivo de ejecución", list(DEVICE_HELP.keys()), help="Controla si se usa CPU o GPU.")
-    st.caption(DEVICE_HELP[device])
-
-    profile = st.selectbox(
-        "Perfil de prueba",
-        ["Rápida para validar", "Presentación en clase", "Completa"],
-        index=1,
-        help="Cambia valores iniciales de resolución y cantidad de frames. Puedes ajustarlos manualmente después.",
-    )
-    preset = {
-        "Rápida para validar": {"imgsz": 320, "warmup": 1, "measure": 3},
-        "Presentación en clase": {"imgsz": 416, "warmup": 3, "measure": 20},
-        "Completa": {"imgsz": 640, "warmup": 5, "measure": 50},
-    }[profile]
 
     imgsz = st.select_slider(
         "Resolución cuadrada",
         options=[320, 416, 512, 640],
-        value=preset["imgsz"],
+        value=416,
         help="Mayor resolución procesa más píxeles. Eso sube el costo aproximado n = H × W.",
     )
-    st.caption("Sirve para ver cómo aumenta el costo cuando crece la entrada del modelo.")
 
-    warmup_frames = st.number_input(
-        "Frames de calentamiento",
-        min_value=0,
-        max_value=30,
-        value=preset["warmup"],
-        help="No se reportan. Sirven para estabilizar carga de modelo, cachés y GPU.",
-    )
-    st.caption("Sirve para evitar que la primera ejecución distorsione el promedio.")
+    with st.expander("Configuración avanzada"):
+        warmup_frames = st.number_input(
+            "Frames de calentamiento",
+            min_value=0,
+            max_value=30,
+            value=3,
+            help="No se reportan. Sirven para estabilizar carga de modelo, cachés y GPU.",
+        )
+        measure_frames = st.number_input(
+            "Frames medidos",
+            min_value=1,
+            max_value=300,
+            value=20,
+            help="Estos frames sí entran en latencia, FPS y estadísticas finales.",
+        )
+        confidence = st.slider(
+            "Confianza mínima",
+            min_value=0.05,
+            max_value=0.95,
+            value=0.25,
+            step=0.05,
+            help="Sirve para aceptar solo detecciones con probabilidad suficiente. Más alto = menos cajas, pero podés perder objetos.",
+        )
+        iou = st.slider(
+            "IoU para NMS",
+            min_value=0.10,
+            max_value=0.95,
+            value=0.45,
+            step=0.05,
+            help="Sirve para decidir cuándo dos cajas se solapan demasiado y deben fusionarse/eliminarse en NMS.",
+        )
+        include_complexity = st.checkbox(
+            "Calcular MACs/GFLOPs aproximados",
+            value=True,
+            help="Activa un forward adicional para estimar operaciones de Conv2d y Linear. Puede tardar un poco más.",
+        )
 
-    measure_frames = st.number_input(
-        "Frames medidos",
-        min_value=1,
-        max_value=300,
-        value=preset["measure"],
-        help="Estos frames sí entran en latencia, FPS y estadísticas finales.",
-    )
-    st.caption("Sirve para decidir qué tan estable será la medición final.")
-
-    confidence = st.slider(
-        "Confianza mínima",
-        min_value=0.05,
-        max_value=0.95,
-        value=0.25,
-        step=0.05,
-        help="Sirve para aceptar solo detecciones con probabilidad suficiente. Más alto = menos cajas, pero podés perder objetos.",
-    )
-    st.caption("Sirve para filtrar detecciones débiles antes de interpretar resultados.")
-
-    iou = st.slider(
-        "IoU para NMS",
-        min_value=0.10,
-        max_value=0.95,
-        value=0.45,
-        step=0.05,
-        help="Sirve para decidir cuándo dos cajas se solapan demasiado y deben fusionarse/eliminarse en NMS.",
-    )
-    st.caption("Sirve para controlar el postprocesamiento de cajas; se conecta con el costo O(B²).")
-    include_complexity = st.checkbox(
-        "Calcular MACs/GFLOPs aproximados",
-        value=True,
-        help="Activa un forward adicional para estimar operaciones de Conv2d y Linear. Puede tardar un poco más.",
-    )
-
-    st.markdown("---")
-    run = st.button("Ejecutar benchmark", type="primary")
-    st.caption("El primer uso puede tardar porque descarga pesos preentrenados en caché local.")
-
-intro_tab, benchmark_tab, theory_tab, controls_tab, system_tab = st.tabs(
-    ["Resumen", "Benchmark", "Complejidad Big-O", "Guía de controles", "Sistema"]
+inicio_tab, benchmark_tab, teoria_tab = st.tabs(
+    ["Inicio", "Benchmark", "Teoría"]
 )
 
-with intro_tab:
+with inicio_tab:
     st.markdown("<h2 class='section-title'>Qué hace este recurso</h2>", unsafe_allow_html=True)
     render_model_overview()
     st.markdown("<h2 class='section-title'>Flujo de uso</h2>", unsafe_allow_html=True)
@@ -733,7 +699,7 @@ with intro_tab:
     st.markdown("<h2 class='section-title'>Catálogo de modelos</h2>", unsafe_allow_html=True)
     st.dataframe(pd.DataFrame(catalog_rows()), width="stretch", hide_index=True)
 
-with theory_tab:
+with teoria_tab:
     st.markdown("<h2 class='section-title'>Parámetro específico de complejidad</h2>", unsafe_allow_html=True)
     left, right = st.columns([1.25, 1])
     with left:
@@ -770,18 +736,19 @@ La lectura práctica es directa: si sube la resolución, sube `n`; si suben cana
         "Big-O explica crecimiento teórico. Latencia, FPS y GFLOPs muestran lo que realmente ocurre en esta máquina."
     )
 
-with controls_tab:
-    render_controls_guide()
+    with st.expander("Guía de controles"):
+        render_controls_guide()
 
-with system_tab:
-    st.markdown("<h2 class='section-title'>Hardware y entorno local</h2>", unsafe_allow_html=True)
-    st.write("Estos datos importan porque el benchmark no es universal: depende del equipo donde se ejecuta.")
-    st.json(system_info_dict())
-    st.write(f"Directorio de exportación: `{default_export_dir()}`")
+    with st.expander("Sistema y exportación"):
+        st.markdown("<h2 class='section-title'>Hardware y entorno local</h2>", unsafe_allow_html=True)
+        st.write("Estos datos importan porque el benchmark no es universal: depende del equipo donde se ejecuta.")
+        st.json(system_info_dict())
+        st.write(f"Directorio de exportación: `{default_export_dir()}`")
 
 with benchmark_tab:
     st.markdown("<h2 class='section-title'>Ejecución del benchmark</h2>", unsafe_allow_html=True)
     render_config_summary(selected_models, source_kind, device, int(imgsz), int(warmup_frames), int(measure_frames), include_complexity)
+    run = st.button("Ejecutar benchmark", type="primary")
     total_needed = int(warmup_frames + measure_frames)
 
     if source_kind == "Webcam OpenCV local" and not run:
