@@ -848,10 +848,6 @@ def metric_cards(df: pd.DataFrame, presentation_mode: bool = False) -> None:
     c1.metric("Menor latencia media", f"{fastest['latency_mean_ms']} ms", fastest["model"])
     c2.metric("Mayor FPS efectivo", f"{most_fps['fps_effective']} FPS", most_fps["model"])
     c3.metric(cost_label, cost_value, cost_delta)
-    st.markdown(
-        "<p class='metric-note'>Estas tarjetas resumen el resultado medido en tu hardware local. No son valores universales: cambian con CPU, GPU, resolución y número de frames.</p>",
-        unsafe_allow_html=True,
-    )
 
 
 def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
