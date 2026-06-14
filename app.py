@@ -1281,56 +1281,27 @@ with benchmark_tab:
     title = "YOLO actual en vivo" if streaming_mode else "Benchmark de tiempo y complejidad"
     st.markdown(f"<h2 class='section-title'>{title}</h2>", unsafe_allow_html=True)
     st.caption("¿Cuánto tarda por frame y cómo crece el costo cuando aumenta n = H×W?")
-    render_benchmark_focus(int(imgsz), streaming_mode, comparison_route)
     render_config_summary(selected_models, source_kind, device, int(imgsz), int(warmup_frames), int(measure_frames), include_complexity, True)
     
-    # Opción de streaming para webcam
-    run = st.button("Iniciar YOLO en vivo" if streaming_mode else "Ejecutar comparación", type="primary")
-    
     total_needed = int(warmup_frames + measure_frames)
-
-    if source_kind == "Webcam OpenCV local" and not run:
-        frames, preview = [], None
-        st.info("La webcam local se leerá recién cuando ejecutes el benchmark para evitar capturas innecesarias.")
-    else:
-        frames_to_load = total_needed if run else 1
-        frames, preview = source_frames(source_kind, frames_to_load, imgsz)
+    frames_to_load = 1
+    frames, preview = source_frames(source_kind, frames_to_load, imgsz)
 
     preview_col = st.columns(1)[0]
     with preview_col:
         if preview is not None:
             render_preview_image(preview, "Vista previa del input")
-
-    # --- Preview con detecciones ---
-    if preview is not None and selected_models and not run:
-        preview_detect_col = st.columns(1)[0]
-        with preview_detect_col:
-            if st.button("Ver detección en preview", key="preview_detection_btn"):
-                preview_config = BenchmarkConfig(
-                    imgsz=int(imgsz),
-                    warmup_frames=0,
-                    measure_frames=1,
-                    confidence=float(confidence),
-                    iou=float(iou),
-                )
-                st.caption("Preview rápido: una inferencia por modelo sobre la imagen actual.")
-                cols = st.columns(min(3, len(selected_models)))
-                for col, model_key in zip(cols, selected_models, strict=False):
-                    spec = MODEL_CATALOG[model_key]
-                    with col:
-                        try:
-                            loaded = cached_load_model(model_key, device)
-                            timing, annotated_bgr = run_frame(loaded, preview, preview_config)
-                            annotated_rgb = cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB)
-                            labels = ", ".join(timing.detection_labels) if timing.detection_labels else "sin detecciones"
-                            st.image(
-                                annotated_rgb,
-                                caption=f"{spec.display_name}: {timing.detections} detecciones — {labels}",
-                                channels="RGB",
-                                width="stretch",
-                            )
-                        except Exception as e:
-                            st.error(f"{spec.display_name}: {e}")
+    
+    # Botón de ejecución debajo de la imagen
+    run = st.button("Iniciar YOLO en vivo" if streaming_mode else "Ejecutar comparación", type="primary")
+    
+    if source_kind == "Webcam OpenCV local" and not run:
+        frames, preview = [], None
+        st.info("La webcam local se leerá recién cuando ejecutes el benchmark para evitar capturas innecesarias.")
+    elif run:
+        # Recargar frames para el benchmark completo
+        frames_to_load = total_needed
+        frames, preview = source_frames(source_kind, frames_to_load, imgsz)
 
     if run:
         if not selected_models:
