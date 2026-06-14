@@ -10,9 +10,8 @@ torch>=2.0.0
 torchvision>=0.15.0
 ultralytics>=8.4.0
 
-# Computer Vision
-# opencv-python para deploy (con packages.txt para dependencias del sistema)
-opencv-python>=4.8.0
+# Computer Vision (headless para deploy sin GUI)
+opencv-python-headless>=4.8.0
 
 # Data & Visualization
 pandas>=2.0.0
