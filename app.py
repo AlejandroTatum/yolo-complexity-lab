@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import cv2
 import sys
 import tempfile
 from pathlib import Path
@@ -16,7 +17,7 @@ import streamlit as st
 
 from yolo_complexity_lab.benchmark import BenchmarkConfig, benchmark_model
 from yolo_complexity_lab.catalog import MODEL_CATALOG, catalog_rows
-from yolo_complexity_lab.exporting import build_plot_html_zip, write_plot_html, write_results_csv
+from yolo_complexity_lab.exporting import write_results_csv
 from yolo_complexity_lab.loaders import load_model
 from yolo_complexity_lab.paths import default_export_dir
 from yolo_complexity_lab.sources import (
@@ -32,7 +33,7 @@ st.set_page_config(
     page_title="YOLO Complexity Lab",
     page_icon=None,
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 SOURCE_HELP = {
@@ -271,7 +272,6 @@ hr {
   border-color: rgba(148, 163, 184, 0.18);
 }
 
-[data-testid="stToolbar"],
 [data-testid="stDecoration"],
 .stDeployButton {
   display: none !important;
@@ -937,24 +937,24 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, pres
         on_click="ignore",
     )
 
-    st.markdown("<h3 class='section-title'>Exportación HTML</h3>", unsafe_allow_html=True)
-    st.caption("Sirve para guardar los gráficos interactivos y compartirlos sin volver a ejecutar el benchmark.")
+    # Exportación HTML removida a pedido del usuario
 
-    if st.button("Preparar gráficos HTML", key="prepare_html_export"):
-        exported_paths = [write_plot_html(fig, name) for name, fig in plots]
-        st.session_state["last_html_zip"] = build_plot_html_zip(plots)
-        st.session_state["last_html_paths"] = [str(path) for path in exported_paths]
-
-    if st.session_state.get("last_html_zip"):
-        st.download_button(
-            "Descargar gráficos HTML (.zip)",
-            st.session_state["last_html_zip"],
-            file_name="graficos_yolo_complexity_lab.zip",
-            mime="application/zip",
-            key="download_html_zip",
-            on_click="ignore",
-        )
-        pass
+    # --- Vista de detecciones: mostrar el último frame anotado por cada modelo ---
+    st.markdown("<h3 class='section-title'>Detección visual (último frame medido)</h3>", unsafe_allow_html=True)
+    st.caption("Estas imágenes muestran qué objetos detectó cada modelo en el último frame medido. Sirve para analizar precisión y falsos positivos.")
+    annotated_frames = st.session_state.get("annotated_frames", {})
+    if annotated_frames:
+        for model_key, frame_bgr in annotated_frames.items():
+            if frame_bgr is not None:
+                try:
+                    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                    spec = MODEL_CATALOG.get(model_key)
+                    model_name = spec.display_name if spec else model_key
+                    st.image(frame_rgb, caption=f"{model_name}", channels="RGB", use_container_width=True)
+                except Exception:
+                    pass
+    else:
+        st.info("No hay imágenes anotadas disponibles. Ejecuta el benchmark con modelos YOLO para generarlas.")
 
 
 def render_controls_guide() -> None:
@@ -1145,6 +1145,32 @@ with benchmark_tab:
         if preview is not None:
             render_preview_image(preview, "Vista previa del input")
 
+    # --- Preview con detecciones ---
+    if preview is not None and selected_models and not run:
+        preview_detect_col = st.columns(1)[0]
+        with preview_detect_col:
+            if st.button("Ver detección en preview", key="preview_detection_btn"):
+                model_key = selected_models[0]
+                try:
+                    loaded = cached_load_model(model_key, device)
+                    if loaded.spec.backend == "ultralytics":
+                        results = loaded.model.predict(
+                            source=preview,
+                            imgsz=int(imgsz),
+                            conf=float(confidence),
+                            iou=float(iou),
+                            device=device,
+                            verbose=False,
+                        )
+                        annotated_frame = results[0].plot()
+                        annotated_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
+                        detections_count = len(getattr(results[0], "boxes", []) or [])
+                        st.image(annotated_rgb, caption=f"Detección: {detections_count} objetos encontrados", channels="RGB", use_container_width=True)
+                    else:
+                        st.info("El preview con detecciones visual solo está disponible para modelos YOLO (Ultralytics).")
+                except Exception as e:
+                    st.error(f"Error al cargar modelo o inferir preview: {e}")
+
     if run:
         if not selected_models:
             st.error("Selecciona al menos un modelo para iniciar el benchmark.")
@@ -1249,6 +1275,12 @@ with benchmark_tab:
                 try:
                     loaded = cached_load_model(model_key, device)
                     row = benchmark_model(loaded, frames, config, include_complexity=include_complexity)
+                    # Guardar frame anotado aparte (no va al DataFrame)
+                    annotated_frame = row.pop("last_annotated_frame", None)
+                    if annotated_frame is not None:
+                        if "annotated_frames" not in st.session_state:
+                            st.session_state["annotated_frames"] = {}
+                        st.session_state["annotated_frames"][model_key] = annotated_frame
                     rows.append(row)
                 except Exception as exc:
                     st.error(f"Falló {spec.display_name}: {exc}")

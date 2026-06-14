@@ -153,10 +153,12 @@ def benchmark_model(
     ram_before = psutil.Process().memory_info().rss / (1024**2)
     
     timings = []
+    last_annotated_frame = None
     # MODIFICACIÓN: Ejecutar y enviar el frame al callback si existe
     for frame in measured_source:
         timing, annotated_frame = run_frame(loaded, frame, config)
         timings.append(timing)
+        last_annotated_frame = annotated_frame
         if frame_callback is not None:
             frame_callback(annotated_frame)
             
@@ -205,4 +207,5 @@ def benchmark_model(
         "big_o_didactic": loaded.spec.didactic_big_o,
         "big_o_postprocess": loaded.spec.postprocess_big_o,
         "ram_delta_mb": round(ram_after - ram_before, 3),
+        "last_annotated_frame": last_annotated_frame,
     }
