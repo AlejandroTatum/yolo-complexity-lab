@@ -810,11 +810,10 @@ def render_config_summary(
         )
 
 
-def render_benchmark_focus(imgsz: int, streaming_mode: bool, comparison_route: str) -> None:
+def render_benchmark_focus(imgsz: int, comparison_route: str) -> None:
     n_pixels = imgsz * imgsz
     baseline_n = 320 * 320
     growth = n_pixels / baseline_n
-    mode_title = "YOLO en vivo" if streaming_mode else "Comparación medida"
     st.markdown("<h3 class='section-title'>Lo que tenés que mirar</h3>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -831,9 +830,9 @@ def render_benchmark_focus(imgsz: int, streaming_mode: bool, comparison_route: s
         )
     with c3:
         render_card(
-            mode_title,
+            "Comparación medida",
             "YOLO procesa la imagen en una pasada; los modelos de dos etapas agregan regiones y más costo.",
-            "green" if streaming_mode else "amber",
+            "amber",
         )
 
 
@@ -1086,7 +1085,6 @@ with st.sidebar:
             max_value=30,
             value=3,
             help="No se reportan. Sirven para estabilizar carga de modelo, cachés y GPU.",
-            disabled=streaming_mode,
         )
         measure_frames = st.number_input(
             "Frames medidos",
@@ -1094,7 +1092,6 @@ with st.sidebar:
             max_value=300,
             value=20,
             help="Estos frames sí entran en latencia, FPS y estadísticas finales.",
-            disabled=streaming_mode,
         )
         confidence = st.slider(
             "Confianza mínima",
@@ -1103,7 +1100,6 @@ with st.sidebar:
             value=0.25,
             step=0.05,
             help="Sirve para aceptar solo detecciones con probabilidad suficiente. Más alto = menos cajas, pero podés perder objetos.",
-            disabled=streaming_mode,
         )
         iou = st.slider(
             "IoU para NMS",
@@ -1112,13 +1108,11 @@ with st.sidebar:
             value=0.45,
             step=0.05,
             help="Sirve para decidir cuándo dos cajas se solapan demasiado y deben fusionarse/eliminarse en NMS.",
-            disabled=streaming_mode,
         )
         include_complexity = st.checkbox(
             "Calcular MACs/GFLOPs aproximados",
             value=True,
             help="Activa un forward adicional para estimar operaciones de Conv2d y Linear. Puede tardar un poco más.",
-            disabled=streaming_mode,
         )
 
         pass
@@ -1164,98 +1158,6 @@ with benchmark_tab:
         if not selected_models:
             st.error("Selecciona al menos un modelo para iniciar el benchmark.")
             st.stop()
-        
-        # Modo streaming con webcam
-        if source_kind == "Webcam OpenCV local" and streaming_mode:
-            if len(selected_models) > 1:
-                st.warning("Streaming benchmark solo soporta 1 modelo a la vez. Se usará el primero seleccionado.")
-            
-            model_key = selected_models[0]
-            spec = MODEL_CATALOG[model_key]
-            
-            st.markdown(f"<h3>Streaming en vivo: {spec.display_name}</h3>", unsafe_allow_html=True)
-            st.info(f"Capturando frames en tiempo real desde cámara {st.session_state.get('camera_index', 0)}. Presiona 'Parar' para finalizar y ver resumen.")
-            
-            try:
-                st.session_state.streaming_active = True
-                loaded = cached_load_model(model_key, device)
-                
-                streaming_results = run_webcam_benchmark_streaming(
-                    loaded,
-                    imgsz=int(imgsz),
-                    confidence=float(confidence),
-                    iou=float(iou),
-                    device=device,
-                    camera_index=int(st.session_state.get('camera_index', 0)),
-                    measure_frames=None,  # <--- Esto lo hace infinito
-                )
-                
-                if streaming_results:
-                    st.success("Streaming finalizado. Resumen del rendimiento:")
-                    
-                    # Mostrar resumen simple del streaming (no tabla de comparación)
-                    from yolo_complexity_lab.complexity import estimate_for_loaded_model
-                    complexity = estimate_for_loaded_model(loaded, int(imgsz)) if include_complexity else None
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Latencia promedio", f"{round(streaming_results['latency_mean_ms'], 1)} ms")
-                        st.metric("FPS efectivo", f"{round(streaming_results['fps_effective'], 1)}")
-                    with col2:
-                        st.metric("Frames medidos", streaming_results["frames_measured"])
-                        st.metric("Detecciones promedio", f"{round(streaming_results['detections_mean'], 1)}")
-                    with col3:
-                        st.metric("Preprocesamiento", f"{round(streaming_results['preprocess_mean_ms'], 1)} ms")
-                        st.metric("Inferencia", f"{round(streaming_results['inference_mean_ms'], 1)} ms")
-                    
-                    if complexity:
-                        st.write(f"**Complejidad:** {complexity.gflops_approx} GFLOPs | {complexity.gmacs} GMACs | {complexity.conv_layers} capas Conv")
-                    
-                    st.write(f"**Modelo:** {spec.display_name} | **Dispositivo:** {device} | **Resolución:** {imgsz}px")
-                    
-                    # Solo guardar para referencia, no mostrar como comparación
-                    row = {
-                        "model_key": spec.key,
-                        "model": spec.display_name,
-                        "family": spec.family,
-                        "backend": spec.backend,
-                        "device": device,
-                        "input_size_px": int(imgsz),
-                        "frames_measured": streaming_results["frames_measured"],
-                        "warmup_frames": 0,
-                        "latency_mean_ms": round(streaming_results["latency_mean_ms"], 3),
-                        "latency_median_ms": round(streaming_results["latency_median_ms"], 3),
-                        "latency_min_ms": round(streaming_results["latency_min_ms"], 3),
-                        "latency_max_ms": round(streaming_results["latency_max_ms"], 3),
-                        "latency_p95_ms": round(streaming_results.get("latency_p95_ms", streaming_results["latency_max_ms"]), 3), 
-                        "fps_effective": round(streaming_results["fps_effective"], 3),
-                        "preprocess_mean_ms": round(streaming_results["preprocess_mean_ms"], 3),
-                        "inference_mean_ms": round(streaming_results["inference_mean_ms"], 3),
-                        "postprocess_mean_ms": round(streaming_results["postprocess_mean_ms"], 3),
-                        "detections_mean": round(streaming_results["detections_mean"], 3),
-                        "parameters": loaded.parameter_count,
-                        "parameters_millions": round(loaded.parameter_count / 1e6, 3) if loaded.parameter_count is not None else None,
-                        "model_size_mb": loaded.model_size_mb,
-                        "model_size_note": loaded.size_note,
-                        "macs": complexity.macs if complexity else None,
-                        "gmacs_approx": complexity.gmacs if complexity else None,
-                        "gflops_approx": complexity.gflops_approx if complexity else None,
-                        "conv_layers_counted": complexity.conv_layers if complexity else None,
-                        "linear_layers_counted": complexity.linear_layers if complexity else None,
-                        "complexity_note": complexity.note if complexity else "No calculado.",
-                        "big_o_inference": spec.inference_big_o,
-                        "big_o_didactic": spec.didactic_big_o,
-                        "big_o_postprocess": spec.postprocess_big_o,
-                        "ram_delta_mb": 0.0,
-                    }
-                    
-                    df = pd.DataFrame([row])
-                    export_path = write_results_csv(df)
-                    st.session_state["last_benchmark_df"] = df
-                    st.session_state["last_benchmark_csv_path"] = str(export_path)
-                    
-            except Exception as exc:
-                st.error(f"Error en streaming: {exc}")
         
         # Modo benchmark estándar
         else:
@@ -1368,7 +1270,6 @@ with benchmark_tab:
             st.session_state["last_benchmark_df"],
             st.session_state.get("last_benchmark_csv_path"),
             True,
-            is_streaming=streaming_mode,
         )
     else:
                     st.info("Ejecutá la comparación para generar tabla, gráficos y CSV.")
