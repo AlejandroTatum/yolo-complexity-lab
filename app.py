@@ -1281,7 +1281,6 @@ with benchmark_tab:
     title = "YOLO actual en vivo" if streaming_mode else "Benchmark de tiempo y complejidad"
     st.markdown(f"<h2 class='section-title'>{title}</h2>", unsafe_allow_html=True)
     st.caption("¿Cuánto tarda por frame y cómo crece el costo cuando aumenta n = H×W?")
-    render_config_summary(selected_models, source_kind, device, int(imgsz), int(warmup_frames), int(measure_frames), include_complexity, True)
     
     total_needed = int(warmup_frames + measure_frames)
     frames_to_load = 1
