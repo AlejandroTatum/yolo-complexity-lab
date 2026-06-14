@@ -1143,7 +1143,7 @@ def render_detection_summary(df: pd.DataFrame) -> None:
             )
 
 
-def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, presentation_mode: bool = False) -> None:
+def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, presentation_mode: bool = False, is_streaming: bool = False) -> None:
     """Render persisted benchmark results and export actions.
 
     Streamlit reruns the script whenever a button, checkbox or download action is
@@ -1154,14 +1154,17 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, pres
         return
 
     metric_cards(df, presentation_mode)
-    render_result_interpretation(df, presentation_mode)
-    render_detection_summary(df)
+    
+    # Solo mostrar comparación y detección si NO es streaming
+    if not is_streaming:
+        render_result_interpretation(df, presentation_mode)
+        render_detection_summary(df)
 
-    st.markdown("<h3 class='section-title'>Resumen comparativo</h3>", unsafe_allow_html=True)
-    st.dataframe(compact_results_table(df), width="stretch", hide_index=True)
+        st.markdown("<h3 class='section-title'>Resumen comparativo</h3>", unsafe_allow_html=True)
+        st.dataframe(compact_results_table(df), width="stretch", hide_index=True)
 
-    with st.expander("Ver tabla técnica completa"):
-        st.dataframe(df, width="stretch", hide_index=True)
+        with st.expander("Ver tabla técnica completa"):
+            st.dataframe(df, width="stretch", hide_index=True)
 
     st.markdown("<h3 class='section-title'>Gráficos</h3>", unsafe_allow_html=True)
     plots = plot_results(df)
@@ -1184,19 +1187,21 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, pres
     # Exportación HTML removida a pedido del usuario
 
     # --- Vista de detecciones: mostrar el último frame anotado por cada modelo ---
-    st.markdown("<h3 class='section-title'>Detección visual (último frame medido)</h3>", unsafe_allow_html=True)
-    st.caption("Estas imágenes muestran qué objetos detectó cada modelo en el último frame medido. Sirve para analizar precisión y falsos positivos.")
-    annotated_frames = st.session_state.get("annotated_frames", {})
-    if annotated_frames:
-        for model_key, frame_bgr in annotated_frames.items():
-            if frame_bgr is not None:
-                try:
-                    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-                    spec = MODEL_CATALOG.get(model_key)
-                    model_name = spec.display_name if spec else model_key
-                    st.image(frame_rgb, caption=f"{model_name}", channels="RGB", width="stretch")
-                except Exception:
-                    pass
+    # Solo mostrar si NO es streaming
+    if not is_streaming:
+        st.markdown("<h3 class='section-title'>Detección visual (último frame medido)</h3>", unsafe_allow_html=True)
+        st.caption("Estas imágenes muestran qué objetos detectó cada modelo en el último frame medido. Sirve para analizar precisión y falsos positivos.")
+        annotated_frames = st.session_state.get("annotated_frames", {})
+        if annotated_frames:
+            for model_key, frame_bgr in annotated_frames.items():
+                if frame_bgr is not None:
+                    try:
+                        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                        spec = MODEL_CATALOG.get(model_key)
+                        model_name = spec.display_name if spec else model_key
+                        st.image(frame_rgb, caption=f"{model_name}", channels="RGB", width="stretch")
+                    except Exception:
+                        pass
     else:
         st.info("No hay imágenes anotadas disponibles. Ejecuta el benchmark con modelos YOLO para generarlas.")
 
@@ -1607,7 +1612,7 @@ with benchmark_tab:
         st.session_state["last_benchmark_df"] = df
         st.session_state["last_benchmark_csv_path"] = str(export_path)
         
-        render_benchmark_results(df, str(export_path), True)
+        render_benchmark_results(df, str(export_path), True, is_streaming=True)
 
     elif "last_benchmark_df" in st.session_state:
         st.info("Mostrando el último benchmark ejecutado. Podés descargar CSV sin volver a medir.")
@@ -1615,6 +1620,7 @@ with benchmark_tab:
             st.session_state["last_benchmark_df"],
             st.session_state.get("last_benchmark_csv_path"),
             True,
+            is_streaming=streaming_mode,
         )
     else:
         if streaming_mode:
