@@ -1151,9 +1151,8 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, pres
 
     metric_cards(df, presentation_mode)
     
-    # Solo mostrar comparación y detección si NO es streaming
+    # Solo mostrar detección y tabla comparativa si NO es streaming
     if not is_streaming:
-        render_result_interpretation(df, presentation_mode)
         render_detection_summary(df)
 
         st.markdown("<h3 class='section-title'>Resumen comparativo</h3>", unsafe_allow_html=True)
