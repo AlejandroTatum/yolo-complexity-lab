@@ -378,31 +378,9 @@ hr {
   background: transparent;
 }
 
-/* SIDEBAR: Solo forzar en desktop (>=768px), mobile usa comportamiento nativo de Streamlit */
-@media (min-width: 768px) {
-  /* Ocultar botón hamburguesa en desktop */
-  button[data-testid="stSidebarNav"] {
-    display: none !important;
-  }
-  
-  /* Forzar sidebar expandido y fijo */
-  section[data-testid="stSidebar"] {
-    transform: none !important;
-    transition: none !important;
-    margin-left: 0 !important;
-    width: 260px !important;
-    min-width: 260px !important;
-    max-width: 260px !important;
-  }
-  
-  /* Ajustar contenido principal */
-  [data-testid="stAppViewContainer"] > section.main {
-    margin-left: 260px !important;
-  }
-}
-
-/* Mobile: dejar que Streamlit maneje el sidebar nativamente */
-/* No aplicar estilos forzados en mobile para permitir colapso */
+/* Sidebar: se maneja nativamente por Streamlit */
+/* initial_sidebar_state="expanded" en st.set_page_config() mantiene abierto por defecto */
+/* No forzar con CSS para evitar problemas en mobile */
 
 .preview-frame {
   border: 1px solid var(--line);
