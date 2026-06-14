@@ -1228,7 +1228,8 @@ dependency_warning()
 render_hero(True)
 
 # Layout de columnas fijas (sidebar no colapsable)
-sidebar_col, main_col = st.columns([0.35, 1], gap="medium")
+# Ratio ajustado para que el sidebar sea angosto y el contenido tenga espacio
+sidebar_col, main_col = st.columns([0.22, 1], gap="medium")
 
 with sidebar_col:
     st.markdown("### Configuración del benchmark")
