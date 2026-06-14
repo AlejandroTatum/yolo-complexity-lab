@@ -1038,16 +1038,13 @@ render_hero(True)
 with st.sidebar:
     st.markdown("### Configuración del benchmark")
     
-    if IS_CLOUD:
-        st.info("🔒 **Modo deploy activo.** Webcam y streaming no disponibles en el navegador. Usa *Demo* o *Subir imagen*.", icon="ℹ️")
-    
     # Detectar cambio de ruta para limpiar resultados viejos
     previous_route = st.session_state.get("comparison_route", None)
     
     comparison_route = st.radio(
         "Ruta de comparación",
         options=list(PRESET_MODELS.keys()),
-        help="Comparar detectores por tiempo y precisión." if IS_CLOUD else "Primero mostrás YOLO en vivo; después comparás contra modelos CNN para probar la teoría.",
+        help="Comparar detectores por tiempo y precisión.",
     )
     
     # Si cambió la ruta, limpiar resultados previos
