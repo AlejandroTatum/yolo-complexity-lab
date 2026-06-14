@@ -392,6 +392,16 @@ hr {
   background: transparent;
 }
 
+/* Ocultar botón de toggle de la sidebar para mantenerla siempre fija */
+[data-testid="stSidebarNav"] {
+  display: none !important;
+}
+
+[data-testid="stSidebar"] {
+  transform: none !important;
+  transition: none !important;
+}
+
 .preview-frame {
   border: 1px solid var(--line);
   border-radius: 22px;
