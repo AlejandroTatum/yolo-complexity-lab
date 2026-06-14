@@ -392,9 +392,30 @@ hr {
   background: transparent;
 }
 
-/* Ocultar SOLO el botón hamburguesa de toggle de la sidebar */
-button[data-testid="stSidebarNav"] {
+/* SIDEBAR FIJO: estilos para columna izquierda como panel lateral fijo */
+[data-testid="stSidebar"] {
   display: none !important;
+}
+
+/* Estilos para la columna izquierda (sidebar fijo) */
+[data-testid="stHorizontalBlock"] > div:first-child {
+  background: #ffffff;
+  border-right: 1px solid var(--line);
+  box-shadow: 10px 0 30px rgba(15, 23, 42, 0.05);
+  padding: 1rem !important;
+  min-height: 100vh !important;
+}
+
+/* Responsive: en móvil apilar verticalmente */
+@media (max-width: 760px) {
+  [data-testid="stHorizontalBlock"] {
+    flex-direction: column !important;
+  }
+  [data-testid="stHorizontalBlock"] > div:first-child {
+    min-height: auto !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--line);
+  }
 }
 
 .preview-frame {
@@ -1206,7 +1227,10 @@ inject_css()
 dependency_warning()
 render_hero(True)
 
-with st.sidebar:
+# Layout de columnas fijas (sidebar no colapsable)
+sidebar_col, main_col = st.columns([0.35, 1], gap="medium")
+
+with sidebar_col:
     st.markdown("### Configuración del benchmark")
     
     if IS_CLOUD:
@@ -1296,241 +1320,242 @@ with st.sidebar:
 
         pass
 
-inicio_tab, benchmark_tab = st.tabs(
-    ["Inicio", "Benchmark"]
-)
+with main_col:
+    inicio_tab, benchmark_tab = st.tabs(
+        ["Inicio", "Benchmark"]
+    )
 
-with inicio_tab:
-    st.markdown("<h2 class='section-title'>Ruta de comparación</h2>", unsafe_allow_html=True)
-    render_model_overview()
-    st.markdown("<h2 class='section-title'>Uso rápido</h2>", unsafe_allow_html=True)
-    render_explanation_flow()
-    st.write("")
-    with st.expander("Ver glosario de métricas"):
-        render_metric_glossary()
+    with inicio_tab:
+        st.markdown("<h2 class='section-title'>Ruta de comparación</h2>", unsafe_allow_html=True)
+        render_model_overview()
+        st.markdown("<h2 class='section-title'>Uso rápido</h2>", unsafe_allow_html=True)
+        render_explanation_flow()
+        st.write("")
+        with st.expander("Ver glosario de métricas"):
+            render_metric_glossary()
 
-with benchmark_tab:
-    title = "YOLO actual en vivo" if streaming_mode else "Benchmark de tiempo y complejidad"
-    st.markdown(f"<h2 class='section-title'>{title}</h2>", unsafe_allow_html=True)
-    st.caption("¿Cuánto tarda por frame y cómo crece el costo cuando aumenta n = H×W?")
-    
-    total_needed = int(warmup_frames + measure_frames)
-    frames_to_load = 1
-    frames, preview = source_frames(source_kind, frames_to_load, imgsz)
-
-    preview_col = st.columns(1)[0]
-    with preview_col:
-        if preview is not None:
-            render_preview_image(preview, "Vista previa del input")
-    
-    st.write("")
-    
-    # Botón de ejecución debajo de la imagen
-    run = st.button("Iniciar YOLO en vivo" if streaming_mode else "Ejecutar comparación", type="primary")
-    
-    if source_kind == "Webcam OpenCV local" and not run:
-        frames, preview = [], None
-        st.info("La webcam local se leerá recién cuando ejecutes el benchmark para evitar capturas innecesarias.")
-    elif run:
-        # Recargar frames para el benchmark completo
-        frames_to_load = total_needed
+    with benchmark_tab:
+        title = "YOLO actual en vivo" if streaming_mode else "Benchmark de tiempo y complejidad"
+        st.markdown(f"<h2 class='section-title'>{title}</h2>", unsafe_allow_html=True)
+        st.caption("¿Cuánto tarda por frame y cómo crece el costo cuando aumenta n = H×W?")
+        
+        total_needed = int(warmup_frames + measure_frames)
+        frames_to_load = 1
         frames, preview = source_frames(source_kind, frames_to_load, imgsz)
 
-    if run:
-        if not selected_models:
-            st.error("Selecciona al menos un modelo para iniciar el benchmark.")
-            st.stop()
+        preview_col = st.columns(1)[0]
+        with preview_col:
+            if preview is not None:
+                render_preview_image(preview, "Vista previa del input")
         
-        # Modo streaming con webcam
-        if source_kind == "Webcam OpenCV local" and streaming_mode:
-            if len(selected_models) > 1:
-                st.warning("Streaming benchmark solo soporta 1 modelo a la vez. Se usará el primero seleccionado.")
+        st.write("")
+        
+        # Botón de ejecución debajo de la imagen
+        run = st.button("Iniciar YOLO en vivo" if streaming_mode else "Ejecutar comparación", type="primary")
+        
+        if source_kind == "Webcam OpenCV local" and not run:
+            frames, preview = [], None
+            st.info("La webcam local se leerá recién cuando ejecutes el benchmark para evitar capturas innecesarias.")
+        elif run:
+            # Recargar frames para el benchmark completo
+            frames_to_load = total_needed
+            frames, preview = source_frames(source_kind, frames_to_load, imgsz)
+
+        if run:
+            if not selected_models:
+                st.error("Selecciona al menos un modelo para iniciar el benchmark.")
+                st.stop()
             
-            model_key = selected_models[0]
-            spec = MODEL_CATALOG[model_key]
-            
-            st.markdown(f"<h3>Streaming en vivo: {spec.display_name}</h3>", unsafe_allow_html=True)
-            st.info(f"Capturando frames en tiempo real desde cámara {st.session_state.get('camera_index', 0)}. Presiona 'Parar' para finalizar y ver resumen.")
-            
-            try:
-                st.session_state.streaming_active = True
-                loaded = cached_load_model(model_key, device)
+            # Modo streaming con webcam
+            if source_kind == "Webcam OpenCV local" and streaming_mode:
+                if len(selected_models) > 1:
+                    st.warning("Streaming benchmark solo soporta 1 modelo a la vez. Se usará el primero seleccionado.")
                 
-                streaming_results = run_webcam_benchmark_streaming(
-                    loaded,
+                model_key = selected_models[0]
+                spec = MODEL_CATALOG[model_key]
+                
+                st.markdown(f"<h3>Streaming en vivo: {spec.display_name}</h3>", unsafe_allow_html=True)
+                st.info(f"Capturando frames en tiempo real desde cámara {st.session_state.get('camera_index', 0)}. Presiona 'Parar' para finalizar y ver resumen.")
+                
+                try:
+                    st.session_state.streaming_active = True
+                    loaded = cached_load_model(model_key, device)
+                    
+                    streaming_results = run_webcam_benchmark_streaming(
+                        loaded,
+                        imgsz=int(imgsz),
+                        confidence=float(confidence),
+                        iou=float(iou),
+                        device=device,
+                        camera_index=int(st.session_state.get('camera_index', 0)),
+                        measure_frames=None,  # <--- Esto lo hace infinito
+                    )
+                    
+                    if streaming_results:
+                        st.success("Streaming finalizado. Generando gráficas...")
+                        
+                        from yolo_complexity_lab.complexity import estimate_for_loaded_model
+                        complexity = estimate_for_loaded_model(loaded, int(imgsz)) if include_complexity else None
+                        
+                        row = {
+                            "model_key": spec.key,
+                            "model": spec.display_name,
+                            "family": spec.family,
+                            "backend": spec.backend,
+                            "device": device,
+                            "input_size_px": int(imgsz),
+                            "frames_measured": streaming_results["frames_measured"],
+                            "warmup_frames": 0,
+                            "latency_mean_ms": round(streaming_results["latency_mean_ms"], 3),
+                            "latency_median_ms": round(streaming_results["latency_median_ms"], 3),
+                            "latency_min_ms": round(streaming_results["latency_min_ms"], 3),
+                            "latency_max_ms": round(streaming_results["latency_max_ms"], 3),
+                            "latency_p95_ms": round(streaming_results.get("latency_p95_ms", streaming_results["latency_max_ms"]), 3), 
+                            "fps_effective": round(streaming_results["fps_effective"], 3),
+                            "preprocess_mean_ms": round(streaming_results["preprocess_mean_ms"], 3),
+                            "inference_mean_ms": round(streaming_results["inference_mean_ms"], 3),
+                            "postprocess_mean_ms": round(streaming_results["postprocess_mean_ms"], 3),
+                            "detections_mean": round(streaming_results["detections_mean"], 3),
+                            "parameters": loaded.parameter_count,
+                            "parameters_millions": round(loaded.parameter_count / 1e6, 3) if loaded.parameter_count is not None else None,
+                            "model_size_mb": loaded.model_size_mb,
+                            "model_size_note": loaded.size_note,
+                            "macs": complexity.macs if complexity else None,
+                            "gmacs_approx": complexity.gmacs if complexity else None,
+                            "gflops_approx": complexity.gflops_approx if complexity else None,
+                            "conv_layers_counted": complexity.conv_layers if complexity else None,
+                            "linear_layers_counted": complexity.linear_layers if complexity else None,
+                            "complexity_note": complexity.note if complexity else "No calculado.",
+                            "big_o_inference": spec.inference_big_o,
+                            "big_o_didactic": spec.didactic_big_o,
+                            "big_o_postprocess": spec.postprocess_big_o,
+                            "ram_delta_mb": 0.0,
+                        }
+                        
+                        df = pd.DataFrame([row])
+                        export_path = write_results_csv(df)
+                        st.session_state["last_benchmark_df"] = df
+                        st.session_state["last_benchmark_csv_path"] = str(export_path)
+                        
+                        render_benchmark_results(df, str(export_path), True)
+                        
+                except Exception as exc:
+                    st.error(f"Error en streaming: {exc}")
+            
+            # Modo benchmark estándar
+            else:
+                if not frames:
+                    st.error("No hay frames disponibles para medir. Revisa la fuente seleccionada.")
+                    st.stop()
+
+                config = BenchmarkConfig(
                     imgsz=int(imgsz),
+                    warmup_frames=int(warmup_frames),
+                    measure_frames=int(measure_frames),
                     confidence=float(confidence),
                     iou=float(iou),
-                    device=device,
-                    camera_index=int(st.session_state.get("camera_index", 0)),
-                    measure_frames=None,  # <--- Esto lo hace infinito
                 )
-                
-                if streaming_results:
-                    st.success("Streaming finalizado. Generando gráficas...")
-                    
-                    from yolo_complexity_lab.complexity import estimate_for_loaded_model
-                    complexity = estimate_for_loaded_model(loaded, int(imgsz)) if include_complexity else None
-                    
-                    row = {
-                        "model_key": spec.key,
-                        "model": spec.display_name,
-                        "family": spec.family,
-                        "backend": spec.backend,
-                        "device": device,
-                        "input_size_px": int(imgsz),
-                        "frames_measured": streaming_results["frames_measured"],
-                        "warmup_frames": 0,
-                        "latency_mean_ms": round(streaming_results["latency_mean_ms"], 3),
-                        "latency_median_ms": round(streaming_results["latency_median_ms"], 3),
-                        "latency_min_ms": round(streaming_results["latency_min_ms"], 3),
-                        "latency_max_ms": round(streaming_results["latency_max_ms"], 3),
-                        "latency_p95_ms": round(streaming_results.get("latency_p95_ms", streaming_results["latency_max_ms"]), 3), 
-                        "fps_effective": round(streaming_results["fps_effective"], 3),
-                        "preprocess_mean_ms": round(streaming_results["preprocess_mean_ms"], 3),
-                        "inference_mean_ms": round(streaming_results["inference_mean_ms"], 3),
-                        "postprocess_mean_ms": round(streaming_results["postprocess_mean_ms"], 3),
-                        "detections_mean": round(streaming_results["detections_mean"], 3),
-                        "parameters": loaded.parameter_count,
-                        "parameters_millions": round(loaded.parameter_count / 1e6, 3) if loaded.parameter_count is not None else None,
-                        "model_size_mb": loaded.model_size_mb,
-                        "model_size_note": loaded.size_note,
-                        "macs": complexity.macs if complexity else None,
-                        "gmacs_approx": complexity.gmacs if complexity else None,
-                        "gflops_approx": complexity.gflops_approx if complexity else None,
-                        "conv_layers_counted": complexity.conv_layers if complexity else None,
-                        "linear_layers_counted": complexity.linear_layers if complexity else None,
-                        "complexity_note": complexity.note if complexity else "No calculado.",
-                        "big_o_inference": spec.inference_big_o,
-                        "big_o_didactic": spec.didactic_big_o,
-                        "big_o_postprocess": spec.postprocess_big_o,
-                        "ram_delta_mb": 0.0,
-                    }
-                    
-                    df = pd.DataFrame([row])
+                rows = []
+                progress = st.progress(0)
+                status = st.empty()
+                st.session_state["annotated_frames"] = {}
+
+                for index, model_key in enumerate(selected_models, start=1):
+                    spec = MODEL_CATALOG[model_key]
+                    status.markdown(f"## Cargando: Modelo {index} de {len(selected_models)}")
+                    try:
+                        loaded = cached_load_model(model_key, device)
+                        row = benchmark_model(loaded, frames, config, include_complexity=include_complexity)
+                        # Guardar frame anotado aparte (no va al DataFrame)
+                        annotated_frame = row.pop("last_annotated_frame", None)
+                        if annotated_frame is not None:
+                            if "annotated_frames" not in st.session_state:
+                                st.session_state["annotated_frames"] = {}
+                            st.session_state["annotated_frames"][model_key] = annotated_frame
+                        rows.append(row)
+                    except Exception as exc:
+                        st.error(f"Falló {spec.display_name}: {exc}")
+                    progress.progress(index / len(selected_models))
+
+                status.empty()
+                progress.empty()
+
+                if rows:
+                    df = pd.DataFrame(rows)
                     export_path = write_results_csv(df)
                     st.session_state["last_benchmark_df"] = df
                     st.session_state["last_benchmark_csv_path"] = str(export_path)
-                    
+                    st.session_state.pop("last_html_zip", None)
+                    st.session_state.pop("last_html_paths", None)
                     render_benchmark_results(df, str(export_path), True)
-                    
-            except Exception as exc:
-                st.error(f"Error en streaming: {exc}")
-        
-        # Modo benchmark estándar
-        else:
-            if not frames:
-                st.error("No hay frames disponibles para medir. Revisa la fuente seleccionada.")
-                st.stop()
+                else:
+                    st.warning("No se pudo medir ningún modelo. Revisa dependencias, conexión o disponibilidad de pesos.")
+        elif "pending_streaming_results" in st.session_state:
+            st.success("Streaming finalizado. Generando gráficas del rendimiento en vivo...")
+            
+            # Recuperar los datos guardados en el finally
+            res = st.session_state.pop("pending_streaming_results")
+            m_key = st.session_state.pop("pending_model_key")
+            imgsz_val = st.session_state.pop("pending_imgsz")
+            dev_val = st.session_state.pop("pending_device")
+            
+            spec = MODEL_CATALOG[m_key]
+            loaded = cached_load_model(m_key, dev_val)
+            
+            from yolo_complexity_lab.complexity import estimate_for_loaded_model
+            complexity = estimate_for_loaded_model(loaded, int(imgsz_val)) if include_complexity else None
+            
+            row = {
+                "model_key": spec.key,
+                "model": spec.display_name,
+                "family": spec.family,
+                "backend": spec.backend,
+                "device": dev_val,
+                "input_size_px": int(imgsz_val),
+                "frames_measured": res["frames_measured"],
+                "warmup_frames": 0,
+                "latency_mean_ms": round(res["latency_mean_ms"], 3),
+                "latency_median_ms": round(res["latency_median_ms"], 3),
+                "latency_min_ms": round(res["latency_min_ms"], 3),
+                "latency_max_ms": round(res["latency_max_ms"], 3),
+                "latency_p95_ms": round(res.get("latency_p95_ms", res["latency_max_ms"]), 3), 
+                "fps_effective": round(res["fps_effective"], 3),
+                "preprocess_mean_ms": round(res["preprocess_mean_ms"], 3),
+                "inference_mean_ms": round(res["inference_mean_ms"], 3),
+                "postprocess_mean_ms": round(res["postprocess_mean_ms"], 3),
+                "detections_mean": round(res["detections_mean"], 3),
+                "parameters": loaded.parameter_count,
+                "parameters_millions": round(loaded.parameter_count / 1e6, 3) if loaded.parameter_count is not None else None,
+                "model_size_mb": loaded.model_size_mb,
+                "model_size_note": loaded.size_note,
+                "macs": complexity.macs if complexity else None,
+                "gmacs_approx": complexity.gmacs if complexity else None,
+                "gflops_approx": complexity.gflops_approx if complexity else None,
+                "conv_layers_counted": complexity.conv_layers if complexity else None,
+                "linear_layers_counted": complexity.linear_layers if complexity else None,
+                "complexity_note": complexity.note if complexity else "No calculado.",
+                "big_o_inference": spec.inference_big_o,
+                "big_o_didactic": spec.didactic_big_o,
+                "big_o_postprocess": spec.postprocess_big_o,
+                "ram_delta_mb": 0.0,
+            }
+            
+            df = pd.DataFrame([row])
+            export_path = write_results_csv(df)
+            st.session_state["last_benchmark_df"] = df
+            st.session_state["last_benchmark_csv_path"] = str(export_path)
+            
+            render_benchmark_results(df, str(export_path), True)
 
-            config = BenchmarkConfig(
-                imgsz=int(imgsz),
-                warmup_frames=int(warmup_frames),
-                measure_frames=int(measure_frames),
-                confidence=float(confidence),
-                iou=float(iou),
+        elif "last_benchmark_df" in st.session_state:
+            st.info("Mostrando el último benchmark ejecutado. Podés descargar CSV sin volver a medir.")
+            render_benchmark_results(
+                st.session_state["last_benchmark_df"],
+                st.session_state.get("last_benchmark_csv_path"),
+                True,
             )
-            rows = []
-            progress = st.progress(0)
-            status = st.empty()
-            st.session_state["annotated_frames"] = {}
-
-            for index, model_key in enumerate(selected_models, start=1):
-                spec = MODEL_CATALOG[model_key]
-                status.markdown(f"## Cargando: Modelo {index} de {len(selected_models)}")
-                try:
-                    loaded = cached_load_model(model_key, device)
-                    row = benchmark_model(loaded, frames, config, include_complexity=include_complexity)
-                    # Guardar frame anotado aparte (no va al DataFrame)
-                    annotated_frame = row.pop("last_annotated_frame", None)
-                    if annotated_frame is not None:
-                        if "annotated_frames" not in st.session_state:
-                            st.session_state["annotated_frames"] = {}
-                        st.session_state["annotated_frames"][model_key] = annotated_frame
-                    rows.append(row)
-                except Exception as exc:
-                    st.error(f"Falló {spec.display_name}: {exc}")
-                progress.progress(index / len(selected_models))
-
-            status.empty()
-            progress.empty()
-
-            if rows:
-                df = pd.DataFrame(rows)
-                export_path = write_results_csv(df)
-                st.session_state["last_benchmark_df"] = df
-                st.session_state["last_benchmark_csv_path"] = str(export_path)
-                st.session_state.pop("last_html_zip", None)
-                st.session_state.pop("last_html_paths", None)
-                render_benchmark_results(df, str(export_path), True)
-            else:
-                st.warning("No se pudo medir ningún modelo. Revisa dependencias, conexión o disponibilidad de pesos.")
-    elif "pending_streaming_results" in st.session_state:
-        st.success("Streaming finalizado. Generando gráficas del rendimiento en vivo...")
-        
-        # Recuperar los datos guardados en el finally
-        res = st.session_state.pop("pending_streaming_results")
-        m_key = st.session_state.pop("pending_model_key")
-        imgsz_val = st.session_state.pop("pending_imgsz")
-        dev_val = st.session_state.pop("pending_device")
-        
-        spec = MODEL_CATALOG[m_key]
-        loaded = cached_load_model(m_key, dev_val)
-        
-        from yolo_complexity_lab.complexity import estimate_for_loaded_model
-        complexity = estimate_for_loaded_model(loaded, int(imgsz_val)) if include_complexity else None
-        
-        row = {
-            "model_key": spec.key,
-            "model": spec.display_name,
-            "family": spec.family,
-            "backend": spec.backend,
-            "device": dev_val,
-            "input_size_px": int(imgsz_val),
-            "frames_measured": res["frames_measured"],
-            "warmup_frames": 0,
-            "latency_mean_ms": round(res["latency_mean_ms"], 3),
-            "latency_median_ms": round(res["latency_median_ms"], 3),
-            "latency_min_ms": round(res["latency_min_ms"], 3),
-            "latency_max_ms": round(res["latency_max_ms"], 3),
-            "latency_p95_ms": round(res.get("latency_p95_ms", res["latency_max_ms"]), 3), 
-            "fps_effective": round(res["fps_effective"], 3),
-            "preprocess_mean_ms": round(res["preprocess_mean_ms"], 3),
-            "inference_mean_ms": round(res["inference_mean_ms"], 3),
-            "postprocess_mean_ms": round(res["postprocess_mean_ms"], 3),
-            "detections_mean": round(res["detections_mean"], 3),
-            "parameters": loaded.parameter_count,
-            "parameters_millions": round(loaded.parameter_count / 1e6, 3) if loaded.parameter_count is not None else None,
-            "model_size_mb": loaded.model_size_mb,
-            "model_size_note": loaded.size_note,
-            "macs": complexity.macs if complexity else None,
-            "gmacs_approx": complexity.gmacs if complexity else None,
-            "gflops_approx": complexity.gflops_approx if complexity else None,
-            "conv_layers_counted": complexity.conv_layers if complexity else None,
-            "linear_layers_counted": complexity.linear_layers if complexity else None,
-            "complexity_note": complexity.note if complexity else "No calculado.",
-            "big_o_inference": spec.inference_big_o,
-            "big_o_didactic": spec.didactic_big_o,
-            "big_o_postprocess": spec.postprocess_big_o,
-            "ram_delta_mb": 0.0,
-        }
-        
-        df = pd.DataFrame([row])
-        export_path = write_results_csv(df)
-        st.session_state["last_benchmark_df"] = df
-        st.session_state["last_benchmark_csv_path"] = str(export_path)
-        
-        render_benchmark_results(df, str(export_path), True)
-
-    elif "last_benchmark_df" in st.session_state:
-        st.info("Mostrando el último benchmark ejecutado. Podés descargar CSV sin volver a medir.")
-        render_benchmark_results(
-            st.session_state["last_benchmark_df"],
-            st.session_state.get("last_benchmark_csv_path"),
-            True,
-        )
-    else:
-        if streaming_mode:
-            st.info("Iniciá YOLO en vivo para ver latencia, FPS y detecciones sobre la cámara.")
         else:
-            st.info("Ejecutá la comparación para generar tabla, gráficos y CSV.")
+            if streaming_mode:
+                st.info("Iniciá YOLO en vivo para ver latencia, FPS y detecciones sobre la cámara.")
+            else:
+                st.info("Ejecutá la comparación para generar tabla, gráficos y CSV.")
