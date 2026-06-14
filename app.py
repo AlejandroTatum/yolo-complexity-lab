@@ -507,8 +507,15 @@ def render_preview_image(frame: object, caption: str = "Vista previa del input")
     """Render a compact full-image preview with object-fit containment."""
     try:
         import cv2
+        import numpy as np
 
-        success, encoded = cv2.imencode(".png", frame)
+        # Convertir RGB a BGR para cv2.imencode (OpenCV usa BGR por defecto)
+        if len(frame.shape) == 3 and frame.shape[2] == 3:
+            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        else:
+            frame_bgr = frame
+        
+        success, encoded = cv2.imencode(".png", frame_bgr)
         if not success:
             raise ValueError("No se pudo codificar la imagen de preview.")
         b64 = base64.b64encode(encoded.tobytes()).decode("ascii")
