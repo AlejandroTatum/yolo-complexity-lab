@@ -378,12 +378,7 @@ hr {
   background: transparent;
 }
 
-/* SIDEBAR FIJO: ocultar botón de toggle y forzar sidebar expandido */
-button[data-testid="stSidebarNav"] {
-  display: none !important;
-}
-
-/* SIDEBAR: Solo forzar en desktop, mobile usa comportamiento nativo de Streamlit */
+/* SIDEBAR: Solo forzar en desktop (>=768px), mobile usa comportamiento nativo de Streamlit */
 @media (min-width: 768px) {
   /* Ocultar botón hamburguesa en desktop */
   button[data-testid="stSidebarNav"] {
@@ -1007,35 +1002,6 @@ def render_controls_guide() -> None:
 
 
 inject_css()
-
-# JavaScript para forzar sidebar en desktop (>=768px), dejar mobile nativo
-st.markdown(
-    """
-    <script>
-    function fixSidebar() {
-        const isDesktop = window.innerWidth >= 768;
-        const sidebar = document.querySelector('[data-testid="stSidebar"]');
-        const toggleButton = document.querySelector('button[data-testid="stSidebarNav"]');
-        
-        if (toggleButton) {
-            toggleButton.style.display = isDesktop ? 'none' : '';
-        }
-        
-        if (sidebar && isDesktop) {
-            sidebar.style.transform = 'none';
-            sidebar.style.transition = 'none';
-            sidebar.style.marginLeft = '0';
-        }
-    }
-    
-    fixSidebar();
-    window.addEventListener('resize', fixSidebar);
-    const observer = new MutationObserver(fixSidebar);
-    observer.observe(document.body, { childList: true, subtree: true });
-    </script>
-    """,
-    unsafe_allow_html=True,
-)
 
 dependency_warning()
 render_hero(True)
