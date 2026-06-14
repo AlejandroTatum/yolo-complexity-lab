@@ -518,17 +518,29 @@ def source_frames(source_kind: str, total_needed: int, imgsz: int) -> tuple[list
         return repeat_frame(frame, total_needed), frame
 
     if source_kind == "Subir imagen":
-        uploaded = st.file_uploader(
-            "Archivo de imagen",
-            type=["jpg", "jpeg", "png", "webp"],
-            key="image_upload",
-            help="La app repetirá esta imagen para medir varios frames con el mismo input.",
-        )
-        if uploaded is None:
-            st.info("Sube una imagen o cambia a 'Demo persona/perro/fruta' para una prueba rápida.")
-            return [], None
-        frame = read_image_file(uploaded)
-        return repeat_frame(frame, total_needed), frame
+        # Only show file uploader on first call (preview), reuse on benchmark
+        if total_needed == 1:
+            uploaded = st.file_uploader(
+                "Archivo de imagen",
+                type=["jpg", "jpeg", "png", "webp"],
+                key="image_upload",
+                help="La app repetirá esta imagen para medir varios frames con el mismo input.",
+            )
+            if uploaded is None:
+                st.info("Sube una imagen o cambia a 'Demo persona/perro/fruta' para una prueba rápida.")
+                return [], None
+            # Cache the uploaded file for the benchmark run
+            st.session_state["uploaded_image_file"] = uploaded
+            frame = read_image_file(uploaded)
+            return repeat_frame(frame, total_needed), frame
+        else:
+            # Reuse cached file from preview call
+            uploaded = st.session_state.get("uploaded_image_file")
+            if uploaded is None:
+                st.error("Primero subí una imagen en el preview.")
+                return [], None
+            frame = read_image_file(uploaded)
+            return repeat_frame(frame, total_needed), frame
 
     frame = sample_coco_frame()
     return repeat_frame(frame, total_needed), frame
