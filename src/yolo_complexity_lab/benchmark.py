@@ -3,7 +3,7 @@ from __future__ import annotations
 import statistics
 import time
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Callable
 
 import psutil
 
@@ -54,7 +54,8 @@ def _resize_rgb(frame_rgb: object, imgsz: int) -> object:
     return cv2.resize(frame_rgb, (imgsz, imgsz), interpolation=cv2.INTER_LINEAR)
 
 
-def run_yolo_frame(loaded: LoadedModel, frame_rgb: object, config: BenchmarkConfig) -> FrameTiming:
+# MODIFICACIÓN: Ahora retorna una tupla (FrameTiming, imagen_anotada)
+def run_yolo_frame(loaded: LoadedModel, frame_rgb: object, config: BenchmarkConfig) -> tuple[FrameTiming, object]:
     start_total = time.perf_counter()
     start_pre = time.perf_counter()
     resized = _resize_rgb(frame_rgb, config.imgsz)
@@ -73,6 +74,9 @@ def run_yolo_frame(loaded: LoadedModel, frame_rgb: object, config: BenchmarkConf
     _sync_if_cuda(loaded.device)
     measured_model_ms = (time.perf_counter() - start_infer) * 1000
 
+    # MODIFICACIÓN: Extraer la imagen anotada con las predicciones de YOLO
+    annotated_frame = results[0].plot()
+
     # Ultralytics exposes internal stage timings. Prefer them when available.
     inference_ms = measured_model_ms
     postprocess_ms = 0.0
@@ -87,10 +91,11 @@ def run_yolo_frame(loaded: LoadedModel, frame_rgb: object, config: BenchmarkConf
         pass
 
     total_ms = (time.perf_counter() - start_total) * 1000
-    return FrameTiming(preprocess_ms, inference_ms, postprocess_ms, total_ms, detections)
+    return FrameTiming(preprocess_ms, inference_ms, postprocess_ms, total_ms, detections), annotated_frame
 
 
-def run_torchvision_frame(loaded: LoadedModel, frame_rgb: object, config: BenchmarkConfig) -> FrameTiming:
+# MODIFICACIÓN: Retorna tupla para coincidir con la firma
+def run_torchvision_frame(loaded: LoadedModel, frame_rgb: object, config: BenchmarkConfig) -> tuple[FrameTiming, object]:
     import torch
 
     start_total = time.perf_counter()
@@ -115,20 +120,24 @@ def run_torchvision_frame(loaded: LoadedModel, frame_rgb: object, config: Benchm
         pass
     postprocess_ms = (time.perf_counter() - start_post) * 1000
     total_ms = (time.perf_counter() - start_total) * 1000
-    return FrameTiming(preprocess_ms, inference_ms, postprocess_ms, total_ms, detections)
+    
+    # Retornamos el frame original ya que torchvision no tiene un .plot() directo
+    return FrameTiming(preprocess_ms, inference_ms, postprocess_ms, total_ms, detections), resized
 
 
-def run_frame(loaded: LoadedModel, frame_rgb: object, config: BenchmarkConfig) -> FrameTiming:
+def run_frame(loaded: LoadedModel, frame_rgb: object, config: BenchmarkConfig) -> tuple[FrameTiming, object]:
     if loaded.spec.backend == "ultralytics":
         return run_yolo_frame(loaded, frame_rgb, config)
     return run_torchvision_frame(loaded, frame_rgb, config)
 
 
+# MODIFICACIÓN: Añadido el parámetro frame_callback
 def benchmark_model(
     loaded: LoadedModel,
     frames: Iterable[object],
     config: BenchmarkConfig,
     include_complexity: bool = True,
+    frame_callback: Callable[[object], None] | None = None,
 ) -> dict[str, object]:
     """Benchmark one loaded model with warmup and measured frames."""
     frame_list = list(frames)
@@ -137,11 +146,20 @@ def benchmark_model(
 
     warmup_source = frame_list[: max(0, config.warmup_frames)] or [frame_list[0]]
     for frame in warmup_source:
+        # En warmup no enviamos la imagen a la UI
         run_frame(loaded, frame, config)
 
     measured_source = frame_list[: max(1, config.measure_frames)]
     ram_before = psutil.Process().memory_info().rss / (1024**2)
-    timings = [run_frame(loaded, frame, config) for frame in measured_source]
+    
+    timings = []
+    # MODIFICACIÓN: Ejecutar y enviar el frame al callback si existe
+    for frame in measured_source:
+        timing, annotated_frame = run_frame(loaded, frame, config)
+        timings.append(timing)
+        if frame_callback is not None:
+            frame_callback(annotated_frame)
+            
     ram_after = psutil.Process().memory_info().rss / (1024**2)
 
     totals = [t.total_ms for t in timings]

@@ -1,10 +1,31 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 ModelFamily = Literal["YOLO", "CNN one-stage", "CNN two-stage"]
 Backend = Literal["ultralytics", "torchvision"]
+
+# Localiza `best.pt` buscando hacia arriba en el árbol de directorios.
+def _find_best_pt() -> str:
+    """Busca un archivo `best.pt` ascendiendo desde este módulo hasta la raíz.
+
+    Retorna la ruta absoluta encontrada o la ruta de trabajo actual + 'best.pt'
+    si no se encuentra el archivo. Evita usar rutas relativas fijas que fallen
+    cuando el cargador cambia el directorio de trabajo.
+    """
+    p = Path(__file__).resolve().parent
+    # Subir hasta 8 niveles para cubrir estructuras de monorepo o ejemplos locales
+    for _ in range(8):
+        candidate = p / "best.pt"
+        if candidate.exists():
+            return str(candidate)
+        p = p.parent
+    # Fallback: asumir que el usuario colocó best.pt en el cwd del proceso
+    return str((Path.cwd() / "best.pt").absolute())
+
+_BEST_PT_PATH = _find_best_pt()
 
 
 @dataclass(frozen=True)
@@ -36,6 +57,25 @@ TWO_STAGE_BIG_O = "O(Σ conv + R × C_roi + NMS), con R = regiones propuestas"
 
 
 MODEL_CATALOG: dict[str, ModelSpec] = {
+    # ---------------------------------------------------------
+    # ¡NUEVO MODELO! YOLOv8 Extra Grande (Gestos)
+    # ---------------------------------------------------------
+    "yolov8_gestures": ModelSpec(
+        key="yolov8_gestures",
+        display_name="YOLOv8x Gestos — Demo",
+        family="YOLO",
+        backend="ultralytics",
+        weight_name=_BEST_PT_PATH,
+        default_imgsz=640,
+        inference_big_o=CONVOLUTIONAL_BIG_O,
+        didactic_big_o=DIDACTIC_BIG_O,
+        postprocess_big_o=NMS_BIG_O,
+        complexity_note=(
+            "Modelo Extra Grande (YOLOv8x) afinado para gestos. Mantiene O(1) pasada, "
+            "pero su enorme cantidad de parámetros aumenta drásticamente la constante de tiempo C."
+        ),
+        default_enabled=True,
+    ),
     "yolo11n": ModelSpec(
         key="yolo11n",
         display_name="YOLO11n — ligero",

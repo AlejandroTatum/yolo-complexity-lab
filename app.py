@@ -57,6 +57,17 @@ METRIC_EXPLANATIONS = {
 }
 
 
+def get_default_device() -> str:
+    """Detecta si hay GPU disponible y retorna el dispositivo apropiado."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda:0"
+    except Exception:
+        pass
+    return "auto"
+
+
 @st.cache_resource(show_spinner=False)
 def cached_load_model(spec_key: str, device: str):
     return load_model(spec_key, device)
@@ -434,6 +445,205 @@ def render_preview_image(frame: object, caption: str = "Vista previa del input")
         st.image(frame, caption=caption, channels="RGB", width="stretch")
 
 
+def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: float, device: str, camera_index: int, measure_frames: int | None = None) -> dict[str, list]:
+    """Ejecuta streaming en tiempo real desde webcam recopilando métricas de benchmarking."""
+    import cv2
+    import time
+    import statistics
+    
+    cap = cv2.VideoCapture(camera_index)
+    if not cap.isOpened():
+        st.error("No se pudo abrir la cámara.")
+        return {}
+    
+    placeholder_video = st.empty()
+    placeholder_stats = st.empty()
+    stop_placeholder = st.empty()
+    
+    timings = {
+        "preprocess": [],
+        "inference": [],
+        "postprocess": [],
+        "total": [],
+        "detections": [],
+    }
+    
+    frame_count = 0
+
+    # Inicializar flag de parada en session_state y renderizar botón una sola vez
+    if "stream_stop_requested" not in st.session_state:
+        st.session_state["stream_stop_requested"] = False
+
+    stop_col = stop_placeholder.columns([4, 1])[1]
+    if stop_col.button("Parar", key="stop_btn_stream"):
+        st.session_state["stream_stop_requested"] = True
+
+    try:
+        # Streaming en vivo: si measure_frames es None, iteramos hasta que el usuario pare
+        while True:
+            # Si el usuario solicitó parar, salimos del loop
+            if st.session_state.get("stream_stop_requested", False):
+                break
+            if measure_frames is not None and frame_count >= measure_frames:
+                break
+            
+            success, frame = cap.read()
+            if not success:
+                continue
+            
+            # Redimensionar
+            frame_resized = cv2.resize(frame, (imgsz, imgsz), interpolation=cv2.INTER_LINEAR)
+            
+            # Medir inferencia
+            detections_count = 0
+            annotated_rgb = frame_resized.copy()
+            
+            try:
+                if loaded.spec.backend == "ultralytics":
+                    # YOLO backend con timing
+                    start_total = time.perf_counter()
+                    
+                    results = loaded.model.predict(
+                        source=frame_resized,
+                        imgsz=imgsz,
+                        conf=confidence,
+                        iou=iou,
+                        device=device,
+                        verbose=False,
+                    )
+                    
+                    total_ms = (time.perf_counter() - start_total) * 1000
+                    
+                    annotated_frame = results[0].plot()
+                    annotated_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
+                    detections_count = len(getattr(results[0], "boxes", []) or [])
+                    
+                    # Extraer timings internos de YOLO
+                    try:
+                        speed = getattr(results[0], "speed", {}) or {}
+                        preprocess_ms = float(speed.get("preprocess", 0.0))
+                        inference_ms = float(speed.get("inference", 0.0))
+                        postprocess_ms = float(speed.get("postprocess", 0.0))
+                    except Exception:
+                        preprocess_ms = 0.0
+                        inference_ms = total_ms
+                        postprocess_ms = 0.0
+                    
+                    timings["preprocess"].append(preprocess_ms)
+                    timings["inference"].append(inference_ms)
+                    timings["postprocess"].append(postprocess_ms)
+                    timings["total"].append(total_ms)
+                    timings["detections"].append(detections_count)
+                    
+                    frame_count += 1
+                    
+                    # --- NUEVO: GUARDADO CONTINUO ---
+                    # Hacemos una copia de seguridad en cada frame. Si el botón 'Parar' mata 
+                    # el proceso, los datos ya están a salvo para graficarlos.
+                    st.session_state["pending_streaming_results"] = {
+                        "frames_measured": frame_count,
+                        "latency_mean_ms": statistics.mean(timings["total"]),
+                        "latency_median_ms": statistics.median(timings["total"]),
+                        "latency_min_ms": min(timings["total"]),
+                        "latency_max_ms": max(timings["total"]),
+                        "fps_effective": 1000 / statistics.mean(timings["total"]) if statistics.mean(timings["total"]) > 0 else 0,
+                        "preprocess_mean_ms": statistics.mean(timings["preprocess"]) if timings["preprocess"] else 0,
+                        "inference_mean_ms": statistics.mean(timings["inference"]) if timings["inference"] else 0,
+                        "postprocess_mean_ms": statistics.mean(timings["postprocess"]) if timings["postprocess"] else 0,
+                        "detections_mean": statistics.mean(timings["detections"]) if timings["detections"] else 0,
+                    }
+                    st.session_state["pending_model_key"] = loaded.spec.key
+                    st.session_state["pending_imgsz"] = imgsz
+                    st.session_state["pending_device"] = device
+                    # --------------------------------
+                    
+                    # Mostrar frame
+                    with placeholder_video.container():
+                        col_img, col_info = st.columns([3, 1])
+                        with col_img:
+                            col_img.image(annotated_rgb, caption=f"Frame en vivo {frame_count}/{measure_frames}", channels="RGB", use_container_width=True)
+                        with col_info:
+                            st.metric("Detecciones", detections_count)
+                    
+                            # Mostrar estadísticas en tiempo real
+                            if frame_count > 0 and timings["total"]:
+                                with placeholder_stats.container():
+                                    col1, col2, col3, col4 = st.columns(4)
+                            
+                                    with col1:
+                                        avg_latency = statistics.mean(timings["total"])
+                                        st.metric("Latencia promedio", f"{avg_latency:.2f} ms")
+                            
+                                    with col2:
+                                        if statistics.mean(timings["total"]) > 0:
+                                            avg_fps = 1000 / statistics.mean(timings["total"])
+                                        else:
+                                            avg_fps = 0
+                                        st.metric("FPS promedio", f"{avg_fps:.1f}")
+                            
+                                    with col3:
+                                        st.metric("Frames capturados", frame_count)
+                            
+                                    with col4:
+                                        avg_detections = statistics.mean(timings["detections"])
+                                        st.metric("Detecciones promedio", f"{avg_detections:.1f}")
+
+                            # Descarga CSV en vivo (actualiza cada iteración)
+                            try:
+                                import io
+                                import pandas as _pd
+                                df_live = _pd.DataFrame({
+                                    "preprocess_ms": timings["preprocess"],
+                                    "inference_ms": timings["inference"],
+                                    "postprocess_ms": timings["postprocess"],
+                                    "total_ms": timings["total"],
+                                    "detections": timings["detections"],
+                                })
+                                csv_bytes = df_live.to_csv(index=False).encode("utf-8")
+                                placeholder_stats.download_button(
+                                    "Descargar CSV parcial",
+                                    csv_bytes,
+                                    file_name="streaming_partial_results.csv",
+                                    mime="text/csv",
+                                    key=f"download_stream_csv_{frame_count}",
+                                )
+                            except Exception:
+                                pass
+                else:
+                    st.error("Streaming benchmark solo soporta YOLO por ahora.")
+                    break
+                    
+            except Exception as e:
+                st.warning(f"Frame {frame_count}: {str(e)[:100]}")
+                continue
+            
+            time.sleep(0.02)
+        
+        # Resumen final
+        if frame_count > 0 and timings["total"]:
+            return {
+                "frames_measured": frame_count,
+                "latency_mean_ms": statistics.mean(timings["total"]),
+                "latency_median_ms": statistics.median(timings["total"]),
+                "latency_min_ms": min(timings["total"]),
+                "latency_max_ms": max(timings["total"]),
+                "fps_effective": 1000 / statistics.mean(timings["total"]) if statistics.mean(timings["total"]) > 0 else 0,
+                "preprocess_mean_ms": statistics.mean(timings["preprocess"]) if timings["preprocess"] else 0,
+                "inference_mean_ms": statistics.mean(timings["inference"]) if timings["inference"] else 0,
+                "postprocess_mean_ms": statistics.mean(timings["postprocess"]) if timings["postprocess"] else 0,
+                "detections_mean": statistics.mean(timings["detections"]) if timings["detections"] else 0,
+                "timings": timings,
+            }
+        return {}
+        
+    finally:
+        cap.release()
+        try:
+            st.session_state["stream_stop_requested"] = False
+        except Exception:
+            pass
+
+
 def compact_results_table(df: pd.DataFrame) -> pd.DataFrame:
     """Return a student-friendly summary before the technical table."""
     columns = [
@@ -516,6 +726,7 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
     latency_fig.update_xaxes(tickangle=-12)
     plots.append(("latencia_media", latency_fig))
 
+    # 2. FPS efectivo
     fps_fig = px.bar(
         df,
         x="model",
@@ -532,11 +743,36 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
     fps_fig.update_xaxes(tickangle=-12)
     plots.append(("fps_efectivo", fps_fig))
 
-    complexity_fig = px.scatter(
+    # 3. Complejidad vs Latencia (gráfico principal de exposición)
+    if "gflops_approx" in df.columns and df["gflops_approx"].notna().any():
+        complexity_fig = px.scatter(
+            df,
+            x="gflops_approx",
+            y="latency_mean_ms",
+            size="parameters_millions",
+            color="family",
+            hover_name="model",
+            title=" Complejidad vs Latencia - GFLOPs Aprox. vs Latencia Real",
+            labels={
+                "gflops_approx": "GFLOPs Aprox. (complejidad teórica)",
+                "latency_mean_ms": "Latencia Real (ms)"
+            },
+            hover_data={
+                "gflops_approx": ":.2f",
+                "latency_mean_ms": ":.2f",
+                "parameters_millions": ":.1f",
+                "fps_effective": ":.1f",
+            }
+        )
+        complexity_fig.update_layout(height=450, hovermode="closest")
+        st.plotly_chart(complexity_fig, use_container_width=True)
+        plots.append(("gflops_vs_latencia", complexity_fig))
+
+    # 4. Parámetros vs Latencia (complejidad del modelo)
+    params_fig = px.scatter(
         df,
-        x="gflops_approx",
+        x="parameters_millions",
         y="latency_mean_ms",
-        size="parameters_millions",
         color="family",
         color_discrete_map=color_map,
         hover_name="model",
@@ -770,8 +1006,10 @@ with st.sidebar:
         help="Define de dónde salen los frames usados en el benchmark.",
     )
 
+    streaming_mode = False
     if source_kind == "Webcam OpenCV local":
         st.number_input("Índice de cámara", min_value=0, max_value=5, value=0, key="camera_index")
+        streaming_mode = st.checkbox("Modo streaming en vivo", value=False)
 
     device = st.selectbox("Dispositivo de ejecución", list(DEVICE_HELP.keys()), help="Controla si se usa CPU o GPU.")
 
@@ -789,6 +1027,7 @@ with st.sidebar:
             max_value=30,
             value=3,
             help="No se reportan. Sirven para estabilizar carga de modelo, cachés y GPU.",
+            disabled=streaming_mode,
         )
         measure_frames = st.number_input(
             "Frames medidos",
@@ -796,6 +1035,7 @@ with st.sidebar:
             max_value=300,
             value=20,
             help="Estos frames sí entran en latencia, FPS y estadísticas finales.",
+            disabled=streaming_mode,
         )
         confidence = st.slider(
             "Confianza mínima",
@@ -804,6 +1044,7 @@ with st.sidebar:
             value=0.25,
             step=0.05,
             help="Sirve para aceptar solo detecciones con probabilidad suficiente. Más alto = menos cajas, pero podés perder objetos.",
+            disabled=streaming_mode,
         )
         iou = st.slider(
             "IoU para NMS",
@@ -812,11 +1053,13 @@ with st.sidebar:
             value=0.45,
             step=0.05,
             help="Sirve para decidir cuándo dos cajas se solapan demasiado y deben fusionarse/eliminarse en NMS.",
+            disabled=streaming_mode,
         )
         include_complexity = st.checkbox(
             "Calcular MACs/GFLOPs aproximados",
             value=True,
             help="Activa un forward adicional para estimar operaciones de Conv2d y Linear. Puede tardar un poco más.",
+            disabled=streaming_mode,
         )
 
         pass
@@ -884,7 +1127,10 @@ with benchmark_tab:
     st.markdown("<h2 class='section-title'>Ejecución del benchmark</h2>", unsafe_allow_html=True)
     st.caption("Abrí el panel lateral para cambiar modelos, fuente, dispositivo o resolución. La configuración actual se resume abajo.")
     render_config_summary(selected_models, source_kind, device, int(imgsz), int(warmup_frames), int(measure_frames), include_complexity, True)
-    run = st.button("Ejecutar benchmark", type="primary")
+    
+    # Opción de streaming para webcam
+    run = st.button("Iniciar Streaming" if streaming_mode else "Ejecutar benchmark", type="primary")
+    
     total_needed = int(warmup_frames + measure_frames)
 
     if source_kind == "Webcam OpenCV local" and not run:
@@ -903,45 +1149,181 @@ with benchmark_tab:
         if not selected_models:
             st.error("Selecciona al menos un modelo para iniciar el benchmark.")
             st.stop()
-        if not frames:
-            st.error("No hay frames disponibles para medir. Revisa la fuente seleccionada.")
-            st.stop()
-
-        config = BenchmarkConfig(
-            imgsz=int(imgsz),
-            warmup_frames=int(warmup_frames),
-            measure_frames=int(measure_frames),
-            confidence=float(confidence),
-            iou=float(iou),
-        )
-        rows = []
-        progress = st.progress(0)
-        status = st.empty()
-
-        for index, model_key in enumerate(selected_models, start=1):
+        
+        # Modo streaming con webcam
+        if source_kind == "Webcam OpenCV local" and streaming_mode:
+            if len(selected_models) > 1:
+                st.warning("Streaming benchmark solo soporta 1 modelo a la vez. Se usará el primero seleccionado.")
+            
+            model_key = selected_models[0]
             spec = MODEL_CATALOG[model_key]
-            status.markdown(f"## Cargando: Modelo {index} de {len(selected_models)}")
+            
+            st.markdown(f"<h3>Streaming en vivo: {spec.display_name}</h3>", unsafe_allow_html=True)
+            st.info(f"Capturando frames en tiempo real desde cámara {st.session_state.get('camera_index', 0)}. Presiona 'Parar' para finalizar y ver resumen.")
+            
             try:
+                st.session_state.streaming_active = True
                 loaded = cached_load_model(model_key, device)
-                row = benchmark_model(loaded, frames, config, include_complexity=include_complexity)
-                rows.append(row)
+                
+                streaming_results = run_webcam_benchmark_streaming(
+                    loaded,
+                    imgsz=int(imgsz),
+                    confidence=float(confidence),
+                    iou=float(iou),
+                    device=device,
+                    camera_index=int(st.session_state.get("camera_index", 0)),
+                    measure_frames=None,  # <--- Esto lo hace infinito
+                )
+                
+                if streaming_results:
+                    st.success("Streaming finalizado. Generando gráficas...")
+                    
+                    from yolo_complexity_lab.complexity import estimate_for_loaded_model
+                    complexity = estimate_for_loaded_model(loaded, int(imgsz)) if include_complexity else None
+                    
+                    row = {
+                        "model_key": spec.key,
+                        "model": spec.display_name,
+                        "family": spec.family,
+                        "backend": spec.backend,
+                        "device": device,
+                        "input_size_px": int(imgsz),
+                        "frames_measured": streaming_results["frames_measured"],
+                        "warmup_frames": 0,
+                        "latency_mean_ms": round(streaming_results["latency_mean_ms"], 3),
+                        "latency_median_ms": round(streaming_results["latency_median_ms"], 3),
+                        "latency_min_ms": round(streaming_results["latency_min_ms"], 3),
+                        "latency_max_ms": round(streaming_results["latency_max_ms"], 3),
+                        "latency_p95_ms": round(streaming_results["latency_max_ms"], 3), 
+                        "fps_effective": round(streaming_results["fps_effective"], 3),
+                        "preprocess_mean_ms": round(streaming_results["preprocess_mean_ms"], 3),
+                        "inference_mean_ms": round(streaming_results["inference_mean_ms"], 3),
+                        "postprocess_mean_ms": round(streaming_results["postprocess_mean_ms"], 3),
+                        "detections_mean": round(streaming_results["detections_mean"], 3),
+                        "parameters": loaded.parameter_count,
+                        "parameters_millions": round(loaded.parameter_count / 1e6, 3) if loaded.parameter_count is not None else None,
+                        "model_size_mb": loaded.model_size_mb,
+                        "model_size_note": loaded.size_note,
+                        "macs": complexity.macs if complexity else None,
+                        "gmacs_approx": complexity.gmacs if complexity else None,
+                        "gflops_approx": complexity.gflops_approx if complexity else None,
+                        "conv_layers_counted": complexity.conv_layers if complexity else None,
+                        "linear_layers_counted": complexity.linear_layers if complexity else None,
+                        "complexity_note": complexity.note if complexity else "No calculado.",
+                        "big_o_inference": spec.inference_big_o,
+                        "big_o_didactic": spec.didactic_big_o,
+                        "big_o_postprocess": spec.postprocess_big_o,
+                        "ram_delta_mb": 0.0,
+                    }
+                    
+                    df = pd.DataFrame([row])
+                    export_path = write_results_csv(df)
+                    st.session_state["last_benchmark_df"] = df
+                    st.session_state["last_benchmark_csv_path"] = str(export_path)
+                    
+                    render_benchmark_results(df, str(export_path), True)
+                    
             except Exception as exc:
-                st.error(f"Falló {spec.display_name}: {exc}")
-            progress.progress(index / len(selected_models))
-
-        status.empty()
-        progress.empty()
-
-        if rows:
-            df = pd.DataFrame(rows)
-            export_path = write_results_csv(df)
-            st.session_state["last_benchmark_df"] = df
-            st.session_state["last_benchmark_csv_path"] = str(export_path)
-            st.session_state.pop("last_html_zip", None)
-            st.session_state.pop("last_html_paths", None)
-            render_benchmark_results(df, str(export_path), True)
+                st.error(f"Error en streaming: {exc}")
+        
+        # Modo benchmark estándar
         else:
-            st.warning("No se pudo medir ningún modelo. Revisa dependencias, conexión o disponibilidad de pesos.")
+            if not frames:
+                st.error("No hay frames disponibles para medir. Revisa la fuente seleccionada.")
+                st.stop()
+
+            config = BenchmarkConfig(
+                imgsz=int(imgsz),
+                warmup_frames=int(warmup_frames),
+                measure_frames=int(measure_frames),
+                confidence=float(confidence),
+                iou=float(iou),
+            )
+            rows = []
+            progress = st.progress(0)
+            status = st.empty()
+
+            for index, model_key in enumerate(selected_models, start=1):
+                spec = MODEL_CATALOG[model_key]
+                status.markdown(f"## Cargando: Modelo {index} de {len(selected_models)}")
+                try:
+                    loaded = cached_load_model(model_key, device)
+                    row = benchmark_model(loaded, frames, config, include_complexity=include_complexity)
+                    rows.append(row)
+                except Exception as exc:
+                    st.error(f"Falló {spec.display_name}: {exc}")
+                progress.progress(index / len(selected_models))
+
+            status.empty()
+            progress.empty()
+
+            if rows:
+                df = pd.DataFrame(rows)
+                export_path = write_results_csv(df)
+                st.session_state["last_benchmark_df"] = df
+                st.session_state["last_benchmark_csv_path"] = str(export_path)
+                st.session_state.pop("last_html_zip", None)
+                st.session_state.pop("last_html_paths", None)
+                render_benchmark_results(df, str(export_path), True)
+            else:
+                st.warning("No se pudo medir ningún modelo. Revisa dependencias, conexión o disponibilidad de pesos.")
+    elif "pending_streaming_results" in st.session_state:
+        st.success("Streaming finalizado. Generando gráficas del rendimiento en vivo...")
+        
+        # Recuperar los datos guardados en el finally
+        res = st.session_state.pop("pending_streaming_results")
+        m_key = st.session_state.pop("pending_model_key")
+        imgsz_val = st.session_state.pop("pending_imgsz")
+        dev_val = st.session_state.pop("pending_device")
+        
+        spec = MODEL_CATALOG[m_key]
+        loaded = cached_load_model(m_key, dev_val)
+        
+        from yolo_complexity_lab.complexity import estimate_for_loaded_model
+        complexity = estimate_for_loaded_model(loaded, int(imgsz_val)) if include_complexity else None
+        
+        row = {
+            "model_key": spec.key,
+            "model": spec.display_name,
+            "family": spec.family,
+            "backend": spec.backend,
+            "device": dev_val,
+            "input_size_px": int(imgsz_val),
+            "frames_measured": res["frames_measured"],
+            "warmup_frames": 0,
+            "latency_mean_ms": round(res["latency_mean_ms"], 3),
+            "latency_median_ms": round(res["latency_median_ms"], 3),
+            "latency_min_ms": round(res["latency_min_ms"], 3),
+            "latency_max_ms": round(res["latency_max_ms"], 3),
+            "latency_p95_ms": round(res["latency_max_ms"], 3), 
+            "fps_effective": round(res["fps_effective"], 3),
+            "preprocess_mean_ms": round(res["preprocess_mean_ms"], 3),
+            "inference_mean_ms": round(res["inference_mean_ms"], 3),
+            "postprocess_mean_ms": round(res["postprocess_mean_ms"], 3),
+            "detections_mean": round(res["detections_mean"], 3),
+            "parameters": loaded.parameter_count,
+            "parameters_millions": round(loaded.parameter_count / 1e6, 3) if loaded.parameter_count is not None else None,
+            "model_size_mb": loaded.model_size_mb,
+            "model_size_note": loaded.size_note,
+            "macs": complexity.macs if complexity else None,
+            "gmacs_approx": complexity.gmacs if complexity else None,
+            "gflops_approx": complexity.gflops_approx if complexity else None,
+            "conv_layers_counted": complexity.conv_layers if complexity else None,
+            "linear_layers_counted": complexity.linear_layers if complexity else None,
+            "complexity_note": complexity.note if complexity else "No calculado.",
+            "big_o_inference": spec.inference_big_o,
+            "big_o_didactic": spec.didactic_big_o,
+            "big_o_postprocess": spec.postprocess_big_o,
+            "ram_delta_mb": 0.0,
+        }
+        
+        df = pd.DataFrame([row])
+        export_path = write_results_csv(df)
+        st.session_state["last_benchmark_df"] = df
+        st.session_state["last_benchmark_csv_path"] = str(export_path)
+        
+        render_benchmark_results(df, str(export_path), True)
+
     elif "last_benchmark_df" in st.session_state:
         st.info("Mostrando el último benchmark ejecutado. Puedes descargar CSV/HTML sin volver a medir.")
         render_benchmark_results(
