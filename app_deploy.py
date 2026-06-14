@@ -383,15 +383,15 @@ button[data-testid="stSidebarNav"] {
   display: none !important;
 }
 
-/* DESKTOP: Sidebar fijo siempre expandido */
-@media (min-width: 761px) {
+/* SIDEBAR: Solo forzar en desktop, mobile usa comportamiento nativo de Streamlit */
+@media (min-width: 768px) {
   /* Ocultar botón hamburguesa en desktop */
   button[data-testid="stSidebarNav"] {
     display: none !important;
   }
   
-  /* Forzar sidebar expandido */
-  [data-testid="stSidebar"] {
+  /* Forzar sidebar expandido y fijo */
+  section[data-testid="stSidebar"] {
     transform: none !important;
     transition: none !important;
     margin-left: 0 !important;
@@ -406,32 +406,8 @@ button[data-testid="stSidebarNav"] {
   }
 }
 
-/* MOBILE: Sidebar colapsable normal */
-@media (max-width: 760px) {
-  /* Mostrar botón hamburguesa */
-  button[data-testid="stSidebarNav"] {
-    display: block !important;
-  }
-  
-  /* Permitir colapso del sidebar */
-  [data-testid="stSidebar"] {
-    width: auto !important;
-    min-width: auto !important;
-    max-width: none !important;
-    transform: none !important;
-    transition: transform 0.3s ease !important;
-  }
-  
-  /* Resetear margen en mobile */
-  [data-testid="stAppViewContainer"] > section.main {
-    margin-left: 0 !important;
-  }
-  
-  /* Cuando sidebar está colapsado en mobile */
-  [data-testid="stSidebar"][aria-expanded="false"] {
-    transform: translateX(-100%) !important;
-  }
-}
+/* Mobile: dejar que Streamlit maneje el sidebar nativamente */
+/* No aplicar estilos forzados en mobile para permitir colapso */
 
 .preview-frame {
   border: 1px solid var(--line);
