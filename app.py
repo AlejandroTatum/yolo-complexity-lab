@@ -1291,6 +1291,8 @@ with benchmark_tab:
         if preview is not None:
             render_preview_image(preview, "Vista previa del input")
     
+    st.write("")
+    
     # Botón de ejecución debajo de la imagen
     run = st.button("Iniciar YOLO en vivo" if streaming_mode else "Ejecutar comparación", type="primary")
     
