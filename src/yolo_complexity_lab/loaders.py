@@ -16,6 +16,7 @@ class LoadedModel:
     parameter_count: int | None
     model_size_mb: float | None
     size_note: str
+    class_names: Any | None = None
 
 
 def _torch_device(requested: str) -> str:
@@ -93,7 +94,15 @@ def load_model(spec_key: str, requested_device: str = "auto") -> LoadedModel:
         if size is None:
             size, fallback_note = _estimate_size_from_params(params)
             size_note = fallback_note
-        return LoadedModel(spec=spec, model=yolo, device=device, parameter_count=params, model_size_mb=size, size_note=size_note)
+        return LoadedModel(
+            spec=spec,
+            model=yolo,
+            device=device,
+            parameter_count=params,
+            model_size_mb=size,
+            size_note=size_note,
+            class_names=getattr(yolo, "names", None),
+        )
 
     if spec.backend == "torchvision":
         import torchvision
@@ -109,6 +118,14 @@ def load_model(spec_key: str, requested_device: str = "auto") -> LoadedModel:
         model.eval().to(torch.device(device))
         params = _count_parameters(model)
         size, size_note = _estimate_size_from_params(params)
-        return LoadedModel(spec=spec, model=model, device=device, parameter_count=params, model_size_mb=size, size_note=size_note)
+        return LoadedModel(
+            spec=spec,
+            model=model,
+            device=device,
+            parameter_count=params,
+            model_size_mb=size,
+            size_note=size_note,
+            class_names=weights.meta.get("categories"),
+        )
 
     raise ValueError(f"Backend no soportado: {spec.backend}")

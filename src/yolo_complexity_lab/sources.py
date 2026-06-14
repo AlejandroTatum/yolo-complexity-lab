@@ -18,6 +18,28 @@ def demo_frame(size: int = 640):
     return img
 
 
+def sample_coco_frame():
+    """Load the local classroom demo image.
+
+    The preferred asset contains a person, a dog and a fruit in one validation
+    board. It keeps the benchmark local and makes recognition differences easy
+    to explain. If the asset is not available, fall back to the Ultralytics bus
+    sample and finally to the synthetic frame so the app still runs.
+    """
+    project_asset = Path(__file__).resolve().parents[2] / "assets" / "demo_person_dog_fruit.jpg"
+    if project_asset.exists():
+        return read_image_file(project_asset)
+    try:
+        import ultralytics
+
+        asset = Path(ultralytics.__file__).resolve().parent / "assets" / "bus.jpg"
+        if asset.exists():
+            return read_image_file(asset)
+    except Exception:
+        pass
+    return demo_frame()
+
+
 def read_image_file(file: BinaryIO | str | Path):
     import cv2
     import numpy as np

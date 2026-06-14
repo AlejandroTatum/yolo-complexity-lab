@@ -58,11 +58,11 @@ if run_camera:
         annotated_frame = results[0].plot()
         annotated_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
         
-        video_placeholder.image(annotated_frame, channels="RGB", use_container_width=True)
+        video_placeholder.image(annotated_frame, channels="RGB", width="stretch")
         texto_gesto.markdown(f"**Gesto Actual:** `{detected_gesture}`")
         
         reaction_url = reactions.get(detected_gesture, "https://via.placeholder.com/400x300?text=" + detected_gesture)
-        reaction_placeholder.image(reaction_url, use_container_width=True)
+        reaction_placeholder.image(reaction_url, width="stretch")
         
     cap.release()
 else:

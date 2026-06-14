@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import cv2
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -15,17 +14,16 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from yolo_complexity_lab.benchmark import BenchmarkConfig, benchmark_model
+from yolo_complexity_lab.benchmark import BenchmarkConfig, benchmark_model, run_frame
 from yolo_complexity_lab.catalog import MODEL_CATALOG, catalog_rows
 from yolo_complexity_lab.exporting import write_results_csv
 from yolo_complexity_lab.loaders import load_model
 from yolo_complexity_lab.paths import default_export_dir
 from yolo_complexity_lab.sources import (
-    demo_frame,
-    frames_from_video,
     frames_from_webcam,
     read_image_file,
     repeat_frame,
+    sample_coco_frame,
 )
 from yolo_complexity_lab.system_info import system_info_dict
 
@@ -37,10 +35,23 @@ st.set_page_config(
 )
 
 SOURCE_HELP = {
-    "Imagen demo": "Usa una imagen generada por la app. Es la opción más estable para comparar modelos rápidamente.",
+    "Demo persona/perro/fruta": "Usa una lámina local con una persona, un perro y una banana para comparar reconocimiento y falsos positivos.",
     "Subir imagen": "Repite una imagen propia varias veces para medir latencia sin depender de un video.",
-    "Subir video": "Extrae frames de un video y mide el rendimiento sobre una secuencia más realista.",
     "Webcam OpenCV local": "Captura frames desde la cámara local. Útil para demo en vivo, pero depende de la cámara y luz.",
+}
+
+PRESET_MODELS = {
+    "YOLO actual en vivo": ["yolo11n"],
+    "Comparación CNN vs YOLO": [
+        "fasterrcnn_mobilenet_fpn",
+        "ssdlite_mobilenet_v3",
+        "yolo11n",
+    ],
+}
+
+PRESET_HELP = {
+    "YOLO actual en vivo": "Mostrar YOLO11n funcionando en tiempo real con webcam local.",
+    "Comparación CNN vs YOLO": "Comparar dos etapas, one-stage CNN y YOLO para probar tiempo y complejidad.",
 }
 
 DEVICE_HELP = {
@@ -79,127 +90,187 @@ def inject_css() -> None:
         """
 <style>
 :root {
-  --bg-0: #0f172a;
-  --bg-1: #0b1220;
-  --glass: rgba(15, 23, 42, 0.72);
-  --glass-soft: rgba(255, 255, 255, 0.055);
-  --border: rgba(148, 163, 184, 0.22);
-  --border-strong: rgba(125, 211, 252, 0.42);
-  --text: #e5edf7;
-  --muted: #9ca9ba;
-  --blue: #7dd3fc;
-  --cyan: #22d3ee;
-  --violet: #a78bfa;
-  --green: #34d399;
-  --amber: #fbbf24;
-  --red: #fb7185;
+  --page: #f6f8fb;
+  --surface: #ffffff;
+  --surface-soft: #eef5ff;
+  --ink: #172033;
+  --muted: #64748b;
+  --line: #d8e0ec;
+  --blue: #2563eb;
+  --cyan: #0891b2;
+  --green: #059669;
+  --amber: #d97706;
+  --violet: #7c3aed;
+  --shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
 }
 
 .stApp {
   background:
-    radial-gradient(circle at 15% 15%, rgba(34, 211, 238, 0.13), transparent 32%),
-    radial-gradient(circle at 85% 0%, rgba(167, 139, 250, 0.14), transparent 34%),
-    linear-gradient(145deg, var(--bg-0) 0%, var(--bg-1) 58%, #050816 100%);
-  color: var(--text);
+    radial-gradient(circle at 12% 0%, rgba(37, 99, 235, 0.10), transparent 28%),
+    linear-gradient(180deg, #f8fbff 0%, var(--page) 58%, #eef3f9 100%);
+  color: var(--ink);
 }
 
 .block-container {
-  padding-top: 2rem;
-  padding-bottom: 3rem;
-  max-width: 1380px;
+  padding-top: 1.35rem;
+  padding-bottom: 2.4rem;
+  max-width: 1240px;
 }
 
 [data-testid="stSidebar"] {
-  background: rgba(3, 7, 18, 0.82);
-  border-right: 1px solid var(--border);
+  background: #ffffff;
+  border-right: 1px solid var(--line);
+  box-shadow: 10px 0 30px rgba(15, 23, 42, 0.05);
 }
 
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
-[data-testid="stSidebar"] label {
+[data-testid="stSidebar"] * {
+  color: var(--ink) !important;
+}
+
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
   color: var(--muted);
 }
 
+[data-testid="stSidebar"] [data-baseweb="select"] > div,
+[data-testid="stSidebar"] input,
+[data-testid="stSidebar"] textarea {
+  background: #f8fafc !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 12px !important;
+}
+
+[data-testid="stSidebar"] [data-baseweb="select"] span {
+  color: var(--ink) !important;
+}
+
+[data-baseweb="radio"] > div {
+  gap: 0.35rem;
+}
+
 h1, h2, h3 {
+  color: var(--ink) !important;
   letter-spacing: -0.035em;
 }
 
+p, li, span, label {
+  color: var(--ink) !important;
+}
+
+/* Asegurar que todo texto nativo de Streamlit sea oscuro sobre fondo claro */
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+[data-testid="stMarkdownContainer"] span,
+.stApp p,
+.stApp li,
+.stApp span,
+.stApp label,
+.stApp .stTextInput label,
+.stApp .stNumberInput label,
+.stApp .stSlider label,
+.stApp .stSelectbox label,
+.stApp .stMultiselect label,
+.stApp .stRadio label,
+.stApp .stCheckbox label,
+.stApp .stTextArea label {
+  color: var(--ink) !important;
+}
+
+.stApp .stCaption {
+  color: var(--muted) !important;
+}
+
+.stApp .stInfo,
+.stApp .stWarning,
+.stApp .stSuccess,
+.stApp .stError {
+  color: var(--ink) !important;
+}
+
+.stApp .stInfo p,
+.stApp .stWarning p,
+.stApp .stSuccess p,
+.stApp .stError p {
+  color: var(--ink) !important;
+}
+
 .hero {
-  padding: 2rem;
-  border: 1px solid var(--border-strong);
-  border-radius: 28px;
-  background: linear-gradient(135deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.44));
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255,255,255,0.08);
-  backdrop-filter: blur(18px);
-  margin-bottom: 1.15rem;
+  padding: 1.35rem 1.55rem;
+  border: 1px solid #cfe0f5;
+  border-radius: 26px;
+  background: linear-gradient(135deg, #ffffff 0%, #f1f7ff 100%);
+  box-shadow: var(--shadow);
+  margin-bottom: 0.9rem;
 }
 
 .hero-kicker {
   color: var(--blue);
-  font-size: 0.82rem;
-  font-weight: 700;
-  letter-spacing: 0.16em;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.15em;
   text-transform: uppercase;
-  margin-bottom: 0.55rem;
+  margin-bottom: 0.35rem;
 }
 
 .hero-title {
-  font-size: clamp(2.05rem, 5vw, 4.4rem);
+  font-size: clamp(2rem, 4.2vw, 3.7rem);
   line-height: 0.98;
   font-weight: 850;
-  color: #f8fafc;
-  margin-bottom: 0.85rem;
+  color: #111827;
+  margin-bottom: 0.45rem;
 }
 
 .hero-subtitle {
   max-width: 860px;
-  color: #b6c2d2;
-  font-size: 1.4rem;
-  line-height: 1.65;
+  color: #475569;
+  font-size: 1.05rem;
+  line-height: 1.45;
 }
 
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.7rem;
-  margin-top: 1.25rem;
+  gap: 0.5rem;
+  margin-top: 0.95rem;
 }
 
 .pill {
-  border: 1px solid rgba(125, 211, 252, 0.35);
-  color: #dff7ff;
-  background: rgba(14, 165, 233, 0.10);
-  padding: 0.48rem 0.8rem;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  background: #eff6ff;
+  padding: 0.42rem 0.68rem;
   border-radius: 999px;
-  font-size: 1rem;
+  font-size: 0.84rem;
+  font-weight: 750;
 }
 
 .glass-card {
-  border: 1px solid var(--border);
-  border-radius: 22px;
-  background: var(--glass);
-  box-shadow: 0 16px 48px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.07);
-  backdrop-filter: blur(14px);
-  padding: 1.1rem 1.15rem;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.055);
+  padding: 1rem 1.05rem;
   height: 100%;
 }
 
 .glass-card h3 {
   margin: 0 0 0.35rem 0;
-  font-size: 1.05rem;
-  color: #f8fafc;
+  font-size: 1rem;
+  color: var(--ink);
 }
 
 .glass-card p {
   color: var(--muted);
-  font-size: 1rem;
-  line-height: 1.55;
+  font-size: 0.93rem;
+  line-height: 1.5;
   margin: 0;
 }
 
-.card-accent-blue { border-top: 3px solid var(--blue); }
-.card-accent-green { border-top: 3px solid var(--green); }
-.card-accent-amber { border-top: 3px solid var(--amber); }
-.card-accent-violet { border-top: 3px solid var(--violet); }
+.card-accent-blue { border-left: 4px solid var(--blue); }
+.card-accent-green { border-left: 4px solid var(--green); }
+.card-accent-amber { border-left: 4px solid var(--amber); }
+.card-accent-violet { border-left: 4px solid var(--violet); }
 
 .small-label {
   display: inline-block;
@@ -208,72 +279,93 @@ h1, h2, h3 {
   letter-spacing: 0.12em;
   color: var(--blue);
   margin-bottom: 0.45rem;
-  font-weight: 750;
+  font-weight: 800;
 }
 
 .metric-note {
   color: var(--muted);
-  font-size: 0.88rem;
-  line-height: 1.55;
+  font-size: 0.86rem;
+  line-height: 1.45;
 }
 
 .section-title {
-  margin: 1.2rem 0 0.55rem 0;
-  color: #f8fafc;
+  margin: 1rem 0 0.5rem 0;
+  color: var(--ink);
+  font-size: clamp(1.35rem, 2.3vw, 2rem);
 }
 
 [data-testid="stMetric"] {
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  background: rgba(255,255,255,0.045);
-  padding: 1rem;
-  box-shadow: 0 12px 34px rgba(0,0,0,0.22);
-}
-
-.stButton > button {
-  width: 100%;
-  border: 1px solid rgba(125, 211, 252, 0.42);
+  border: 1px solid var(--line);
   border-radius: 18px;
-  background: linear-gradient(135deg, rgba(125, 211, 252, 0.20), rgba(167, 139, 250, 0.14));
-  color: #eef9ff;
+  background: #ffffff;
+  padding: 0.95rem;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.055);
+}
+
+[data-testid="stMetric"] label,
+[data-testid="stMetric"] [data-testid="stMetricDelta"] {
+  color: var(--muted) !important;
+}
+
+[data-testid="stMetricValue"] {
+  color: var(--ink) !important;
+}
+
+.stButton > button,
+.stDownloadButton > button {
+  width: auto;
+  border: 1px solid #2563eb;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2563eb, #0891b2);
+  color: white;
   font-weight: 800;
-  min-height: 3.05rem;
-  box-shadow: 0 16px 42px rgba(34, 211, 238, 0.16), inset 0 1px 0 rgba(255,255,255,0.13);
-  backdrop-filter: blur(16px);
-  transition: all 160ms ease;
+  min-height: 2.75rem;
+  padding: 0 1.25rem;
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.22);
+  transition: all 150ms ease;
 }
 
-.stButton > button:hover {
-  border-color: rgba(125, 211, 252, 0.78);
+.stButton > button *,
+.stDownloadButton > button * {
+  color: #ffffff !important;
+}
+
+.stButton > button:hover,
+.stDownloadButton > button:hover {
+  border-color: #1d4ed8;
   transform: translateY(-1px);
-  box-shadow: 0 22px 54px rgba(34, 211, 238, 0.23), inset 0 1px 0 rgba(255,255,255,0.18);
-}
-
-.stButton > button:active {
-  transform: translateY(0px) scale(0.99);
+  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.26);
 }
 
 [data-testid="stTabs"] button {
   border-radius: 999px;
+  color: var(--muted);
+}
+
+[data-testid="stTabs"] button[aria-selected="true"] {
+  color: var(--blue);
+  background: #eff6ff;
 }
 
 [data-testid="stDataFrame"] {
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 18px;
   overflow: hidden;
+  background: white;
 }
 
-code {
-  color: #bae6fd !important;
-  font-size: 1.05rem;
+code, pre {
+  color: #1d4ed8 !important;
+  background: #eff6ff !important;
 }
 
 hr {
-  border-color: rgba(148, 163, 184, 0.18);
+  border-color: var(--line);
 }
 
 [data-testid="stDecoration"],
-.stDeployButton {
+.stDeployButton,
+[data-testid="stToolbar"] {
   display: none !important;
 }
 
@@ -282,19 +374,19 @@ hr {
 }
 
 .preview-frame {
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.96);
-  padding: 0.55rem;
-  box-shadow: 0 18px 42px rgba(0,0,0,0.20);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: #ffffff;
+  padding: 0.65rem;
+  box-shadow: var(--shadow);
 }
 
 .preview-frame img {
   width: 100%;
-  max-height: 300px;
+  max-height: 340px;
   object-fit: contain;
   display: block;
-  border-radius: 12px;
+  border-radius: 16px;
   background: #f8fafc;
 }
 
@@ -305,19 +397,23 @@ hr {
   margin-top: 0.45rem;
 }
 
+div[data-testid="stAlert"] {
+  border-radius: 16px;
+}
+
 @media (max-width: 760px) {
-  .hero { padding: 1.25rem; border-radius: 22px; }
-  .hero-title { font-size: 2.45rem; }
-  .hero-subtitle { font-size: 0.95rem; }
-  .hero-actions { gap: 0.45rem; }
-  .pill { font-size: 0.74rem; padding: 0.38rem 0.62rem; }
+  .block-container { padding-top: 0.8rem; }
+  .hero { padding: 1rem; border-radius: 20px; }
+  .hero-title { font-size: 2.1rem; }
+  .hero-subtitle { font-size: 0.92rem; }
+  .hero-actions { gap: 0.38rem; }
+  .pill { font-size: 0.72rem; padding: 0.34rem 0.55rem; }
   .preview-frame img { max-height: 260px; }
 }
 </style>
         """,
         unsafe_allow_html=True,
     )
-
 
 def dependency_warning() -> None:
     missing = []
@@ -341,9 +437,9 @@ def dependency_warning() -> None:
 
 def render_hero(presentation_mode: bool = False) -> None:
     subtitle = (
-        "Compara detectores YOLO en tu hardware local."
+        "Evolución de detectores, reconocimiento y tiempo real en una demo local."
         if presentation_mode
-        else "Compara detectores YOLO por latencia, FPS y costo computacional en tu hardware local."
+        else "Compara detectores antiguos y YOLO por reconocimiento, latencia, FPS y costo computacional."
     )
     st.markdown(
         f"""
@@ -356,6 +452,7 @@ def render_hero(presentation_mode: bool = False) -> None:
   <div class="hero-actions">
     <span class="pill">Latencia por frame</span>
     <span class="pill">FPS efectivo</span>
+    <span class="pill">Qué reconoce</span>
     <span class="pill">MACs y GFLOPs</span>
     <span class="pill">Big-O por modelo</span>
     <span class="pill">CPU o GPU local</span>
@@ -379,8 +476,8 @@ def render_card(title: str, body: str, accent: str = "blue") -> None:
 
 
 def source_frames(source_kind: str, total_needed: int, imgsz: int) -> tuple[list[object], object | None]:
-    if source_kind == "Imagen demo":
-        frame = demo_frame(imgsz)
+    if source_kind == "Demo persona/perro/fruta":
+        frame = sample_coco_frame()
         return repeat_frame(frame, total_needed), frame
 
     if source_kind == "Subir imagen":
@@ -391,27 +488,10 @@ def source_frames(source_kind: str, total_needed: int, imgsz: int) -> tuple[list
             help="La app repetirá esta imagen para medir varios frames con el mismo input.",
         )
         if uploaded is None:
-            st.info("Sube una imagen o cambia a 'Imagen demo' para una prueba rápida.")
+            st.info("Sube una imagen o cambia a 'Demo persona/perro/fruta' para una prueba rápida.")
             return [], None
         frame = read_image_file(uploaded)
         return repeat_frame(frame, total_needed), frame
-
-    if source_kind == "Subir video":
-        uploaded_video = st.file_uploader(
-            "Archivo de video",
-            type=["mp4", "mov", "avi", "mkv"],
-            key="video_upload",
-            help="La app extrae frames del video hasta completar el benchmark configurado.",
-        )
-        if uploaded_video is None:
-            st.info("Sube un video para medir frames reales o cambia a 'Imagen demo'.")
-            return [], None
-        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_video.name).suffix) as tmp:
-            tmp.write(uploaded_video.read())
-            tmp_path = Path(tmp.name)
-        frames = frames_from_video(tmp_path, limit=total_needed, stride=1)
-        preview = frames[0] if frames else None
-        return frames, preview
 
     if source_kind == "Webcam OpenCV local":
         camera_index = int(st.session_state.get("camera_index", 0))
@@ -419,7 +499,7 @@ def source_frames(source_kind: str, total_needed: int, imgsz: int) -> tuple[list
         preview = frames[0] if frames else None
         return frames, preview
 
-    frame = demo_frame(imgsz)
+    frame = sample_coco_frame()
     return repeat_frame(frame, total_needed), frame
 
 
@@ -450,6 +530,13 @@ def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: f
     import cv2
     import time
     import statistics
+
+    def percentile(values: list[float], p: float) -> float:
+        if not values:
+            return 0.0
+        ordered = sorted(values)
+        index = min(len(ordered) - 1, max(0, round((p / 100) * (len(ordered) - 1))))
+        return float(ordered[index])
     
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
@@ -546,6 +633,7 @@ def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: f
                         "latency_median_ms": statistics.median(timings["total"]),
                         "latency_min_ms": min(timings["total"]),
                         "latency_max_ms": max(timings["total"]),
+                        "latency_p95_ms": percentile(timings["total"], 95),
                         "fps_effective": 1000 / statistics.mean(timings["total"]) if statistics.mean(timings["total"]) > 0 else 0,
                         "preprocess_mean_ms": statistics.mean(timings["preprocess"]) if timings["preprocess"] else 0,
                         "inference_mean_ms": statistics.mean(timings["inference"]) if timings["inference"] else 0,
@@ -561,7 +649,7 @@ def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: f
                     with placeholder_video.container():
                         col_img, col_info = st.columns([3, 1])
                         with col_img:
-                            col_img.image(annotated_rgb, caption=f"Frame en vivo {frame_count}/{measure_frames}", channels="RGB", use_container_width=True)
+                            col_img.image(annotated_rgb, caption=f"Frame en vivo {frame_count}/{measure_frames}", channels="RGB", width="stretch")
                         with col_info:
                             st.metric("Detecciones", detections_count)
                     
@@ -627,6 +715,7 @@ def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: f
                 "latency_median_ms": statistics.median(timings["total"]),
                 "latency_min_ms": min(timings["total"]),
                 "latency_max_ms": max(timings["total"]),
+                "latency_p95_ms": percentile(timings["total"], 95),
                 "fps_effective": 1000 / statistics.mean(timings["total"]) if statistics.mean(timings["total"]) > 0 else 0,
                 "preprocess_mean_ms": statistics.mean(timings["preprocess"]) if timings["preprocess"] else 0,
                 "inference_mean_ms": statistics.mean(timings["inference"]) if timings["inference"] else 0,
@@ -646,26 +735,33 @@ def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: f
 
 def compact_results_table(df: pd.DataFrame) -> pd.DataFrame:
     """Return a student-friendly summary before the technical table."""
+    summary = df.copy()
+    if "input_size_px" in summary.columns:
+        summary["input_pixels_n"] = summary["input_size_px"].astype(int) ** 2
     columns = [
         "model",
         "family",
         "latency_mean_ms",
+        "latency_p95_ms",
         "fps_effective",
+        "input_pixels_n",
         "gflops_approx",
         "parameters_millions",
-        "big_o_postprocess",
+        "recognized_classes",
     ]
-    available = [col for col in columns if col in df.columns]
-    summary = df[available].copy()
+    available = [col for col in columns if col in summary.columns]
+    summary = summary[available].copy()
     return summary.rename(
         columns={
             "model": "Modelo",
             "family": "Familia",
             "latency_mean_ms": "Latencia media (ms)",
+            "latency_p95_ms": "p95 (ms)",
             "fps_effective": "FPS",
+            "input_pixels_n": "n = H×W",
             "gflops_approx": "GFLOPs aprox.",
             "parameters_millions": "Parámetros (M)",
-            "big_o_postprocess": "Postproceso Big-O",
+            "recognized_classes": "Qué reconoció",
         }
     )
 
@@ -679,12 +775,21 @@ def metric_cards(df: pd.DataFrame, presentation_mode: bool = False) -> None:
             unsafe_allow_html=True,
         )
     fastest = df.sort_values("latency_mean_ms").iloc[0]
-    lightest = df.sort_values("parameters_millions", na_position="last").iloc[0]
     most_fps = df.sort_values("fps_effective", ascending=False).iloc[0]
+    if "gflops_approx" in df.columns and df["gflops_approx"].notna().any():
+        lowest_cost = df.sort_values("gflops_approx", na_position="last").iloc[0]
+        cost_label = "Menor GFLOPs aprox."
+        cost_value = f"{lowest_cost['gflops_approx']} G"
+        cost_delta = lowest_cost["model"]
+    else:
+        lowest_cost = df.sort_values("parameters_millions", na_position="last").iloc[0]
+        cost_label = "Menos parámetros"
+        cost_value = f"{lowest_cost['parameters_millions']} M"
+        cost_delta = lowest_cost["model"]
     c1, c2, c3 = st.columns(3)
     c1.metric("Menor latencia media", f"{fastest['latency_mean_ms']} ms", fastest["model"])
     c2.metric("Mayor FPS efectivo", f"{most_fps['fps_effective']} FPS", most_fps["model"])
-    c3.metric("Menos parámetros", f"{lightest['parameters_millions']} M", lightest["model"])
+    c3.metric(cost_label, cost_value, cost_delta)
     st.markdown(
         "<p class='metric-note'>Estas tarjetas resumen el resultado medido en tu hardware local. No son valores universales: cambian con CPU, GPU, resolución y número de frames.</p>",
         unsafe_allow_html=True,
@@ -701,11 +806,12 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
         "CNN one-stage": "#34d399",
         "CNN two-stage": "#fbbf24",
     }
-    template = "plotly_dark"
+    template = "plotly_white"
     common_layout = dict(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=24, r=16, t=48, b=70),
+        font=dict(color="#172033"),
+        margin=dict(l=28, r=18, t=48, b=72),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         height=330,
     )
@@ -726,7 +832,6 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
     latency_fig.update_xaxes(tickangle=-12)
     plots.append(("latencia_media", latency_fig))
 
-    # 2. FPS efectivo
     fps_fig = px.bar(
         df,
         x="model",
@@ -743,75 +848,94 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
     fps_fig.update_xaxes(tickangle=-12)
     plots.append(("fps_efectivo", fps_fig))
 
-    # 3. Complejidad vs Latencia (gráfico principal de exposición)
+    top_left, top_right = st.columns(2)
+    with top_left:
+        st.plotly_chart(latency_fig, width="stretch", config={"displayModeBar": False})
+    with top_right:
+        st.plotly_chart(fps_fig, width="stretch", config={"displayModeBar": False})
+
     if "gflops_approx" in df.columns and df["gflops_approx"].notna().any():
+        hover_data = {
+            "gflops_approx": ":.2f",
+            "latency_mean_ms": ":.2f",
+            "parameters_millions": ":.2f",
+            "fps_effective": ":.1f",
+        }
+        if "recognized_classes" in df.columns:
+            hover_data["recognized_classes"] = True
         complexity_fig = px.scatter(
             df,
             x="gflops_approx",
             y="latency_mean_ms",
             size="parameters_millions",
             color="family",
+            color_discrete_map=color_map,
             hover_name="model",
-            title=" Complejidad vs Latencia - GFLOPs Aprox. vs Latencia Real",
+            template=template,
+            title="Complejidad computacional vs tiempo real",
             labels={
-                "gflops_approx": "GFLOPs Aprox. (complejidad teórica)",
-                "latency_mean_ms": "Latencia Real (ms)"
+                "gflops_approx": "GFLOPs aproximados",
+                "latency_mean_ms": "Latencia media (ms)",
+                "parameters_millions": "Parámetros (M)",
             },
-            hover_data={
-                "gflops_approx": ":.2f",
-                "latency_mean_ms": ":.2f",
-                "parameters_millions": ":.1f",
-                "fps_effective": ":.1f",
-            }
+            hover_data=hover_data,
         )
-        complexity_fig.update_layout(height=450, hovermode="closest")
-        st.plotly_chart(complexity_fig, use_container_width=True)
+        complexity_fig.update_layout(**{**common_layout, "height": 390, "margin": dict(l=48, r=18, t=48, b=54)})
+        st.plotly_chart(complexity_fig, width="stretch", config={"displayModeBar": False})
         plots.append(("gflops_vs_latencia", complexity_fig))
 
-    # 4. Parámetros vs Latencia (complejidad del modelo)
-    params_fig = px.scatter(
-        df,
-        x="parameters_millions",
-        y="latency_mean_ms",
-        color="family",
-        color_discrete_map=color_map,
-        hover_name="model",
-        template=template,
-        title="Complejidad vs tiempo real",
-        labels={"gflops_approx": "GFLOPs aproximados", "latency_mean_ms": "Latencia media (ms)"},
-    )
-    complexity_fig.update_layout(**{**common_layout, "height": 360, "margin": dict(l=48, r=16, t=48, b=54)})
-    plots.append(("gflops_vs_latencia", complexity_fig))
-
-    top_left, top_right = st.columns(2)
-    with top_left:
-        st.plotly_chart(latency_fig, width="stretch", config={"displayModeBar": False})
-    with top_right:
-        st.plotly_chart(fps_fig, width="stretch", config={"displayModeBar": False})
-    st.plotly_chart(complexity_fig, width="stretch", config={"displayModeBar": False})
     return plots
-
 
 def render_model_overview() -> None:
     c1, c2, c3 = st.columns(3)
     with c1:
         render_card(
-            "YOLO",
-            "Detector de una etapa. Predice cajas y clases en una sola pasada; por eso suele tener baja latencia.",
+            "1. YOLO actual",
+            "Arrancá con webcam: una pasada por frame para mostrar tiempo real.",
             "blue",
         )
     with c2:
         render_card(
-            "SSDlite",
-            "También es one-stage, pero usa una familia CNN ligera basada en MobileNet. Sirve como comparación rápida.",
+            "2. Comparación",
+            "Luego medí Faster R-CNN, SSDlite y YOLO con la misma imagen.",
             "green",
         )
     with c3:
         render_card(
-            "Faster R-CNN",
-            "Detector de dos etapas. Agrega propuestas de regiones, lo que suele aumentar costo y latencia.",
-            "amber",
+            "3. Conclusión",
+            "Usá latencia, FPS y n = H×W para explicar complejidad.",
+            "violet",
         )
+
+
+def render_theory_bridge() -> None:
+    st.markdown("<h2 class='section-title'>De la teoría a la demo</h2>", unsafe_allow_html=True)
+    cols = st.columns(4)
+    cards = [
+        (
+            "Problema",
+            "Detectar implica localizar y clasificar varios objetos. Los pipelines antiguos repetían trabajo y aumentaban latencia.",
+            "amber",
+        ),
+        (
+            "Idea YOLO",
+            "Convertir detección en una regresión única: una pasada hacia adelante sobre la imagen completa.",
+            "blue",
+        ),
+        (
+            "Costo dominante",
+            "Las convoluciones explican el crecimiento principal: resolución, capas, canales y kernel elevan operaciones.",
+            "violet",
+        ),
+        (
+            "Evidencia local",
+            "La app cruza Big-O con GFLOPs, parámetros, RAM, latencia, FPS y clases reconocidas.",
+            "green",
+        ),
+    ]
+    for col, (title, body, accent) in zip(cols, cards, strict=False):
+        with col:
+            render_card(title, body, accent)
 
 
 def render_metric_glossary() -> None:
@@ -823,14 +947,13 @@ def render_metric_glossary() -> None:
 
 
 def render_explanation_flow() -> None:
-    steps = st.columns(4)
+    steps = st.columns(3)
     content = [
-        ("1. Entrada", "Todos los modelos reciben el mismo frame y la misma resolución. Así la comparación no depende del input."),
-        ("2. Modelo", "YOLO, SSDlite y Faster R-CNN representan distintas familias de detectores de objetos."),
-        ("3. Medición", "Se separan calentamiento y frames medidos para reportar latencia, FPS y costo aproximado."),
-        ("4. Lectura", "Se conecta la fórmula Big-O con los datos reales del hardware local."),
+        ("Tiempo", "Latencia media/p95 y FPS efectivo."),
+        ("Complejidad", "n = H×W, GFLOPs y parámetros."),
+        ("Reconocimiento", "Sirve como apoyo visual, no como mAP formal."),
     ]
-    accents = ["blue", "green", "violet", "amber"]
+    accents = ["blue", "green", "violet"]
     for col, (title, body), accent in zip(steps, content, accents, strict=False):
         with col:
             render_card(title, body, accent)
@@ -861,33 +984,70 @@ def render_config_summary(
         )
 
 
+def render_benchmark_focus(imgsz: int, streaming_mode: bool, comparison_route: str) -> None:
+    n_pixels = imgsz * imgsz
+    baseline_n = 320 * 320
+    growth = n_pixels / baseline_n
+    mode_title = "YOLO en vivo" if streaming_mode else "Comparación medida"
+    st.markdown("<h3 class='section-title'>Lo que tenés que mirar</h3>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        render_card(
+            "Tiempo",
+            "Latencia baja = más FPS. Para 30 FPS, cada frame debe estar cerca o debajo de 33 ms.",
+            "blue",
+        )
+    with c2:
+        render_card(
+            "Complejidad n",
+            f"n = H×W = {imgsz}×{imgsz} = {n_pixels:,} píxeles. Frente a 320², procesa {growth:.2f}× más píxeles.",
+            "violet",
+        )
+    with c3:
+        render_card(
+            mode_title,
+            "YOLO procesa la imagen en una pasada; los modelos de dos etapas agregan regiones y más costo.",
+            "green" if streaming_mode else "amber",
+        )
+
+
 def render_result_interpretation(df: pd.DataFrame, presentation_mode: bool = False) -> None:
     if df.empty:
         return
     fastest = df.sort_values("latency_mean_ms").iloc[0]
     highest_fps = df.sort_values("fps_effective", ascending=False).iloc[0]
+    most_detections = df.sort_values("detections_mean", ascending=False).iloc[0]
     complexity_df = df.dropna(subset=["gflops_approx"])
     if not complexity_df.empty:
-        heaviest = complexity_df.sort_values("gflops_approx", ascending=False).iloc[0]
+        lowest_gflops = complexity_df.sort_values("gflops_approx").iloc[0]
         complexity_sentence = (
-            f"El mayor costo aproximado lo tiene <strong>{heaviest['model']}</strong> "
-            f"con {heaviest['gflops_approx']} GFLOPs."
+            f"Menor GFLOPs aproximado: <strong>{lowest_gflops['model']}</strong> "
+            f"con {lowest_gflops['gflops_approx']} G."
         )
     else:
         complexity_sentence = "No se calculó GFLOPs en esta corrida."
+
+    theory_sentence = (
+        "Con el mismo n = H×W, la evidencia principal es latencia/FPS: "
+        "si YOLO procesa más rápido, se observa el beneficio de la pasada única y las optimizaciones de arquitectura."
+    )
 
     if presentation_mode:
         bullets = [
             f"<li>Menor latencia: <strong>{fastest['model']}</strong> — {fastest['latency_mean_ms']} ms por frame.</li>",
             f"<li>Mayor FPS: <strong>{highest_fps['model']}</strong> — {highest_fps['fps_effective']} FPS.</li>",
-            f"<li>{complexity_sentence} La conclusión cruza teoría, GFLOPs y tiempo real.</li>",
+            f"<li>Más detecciones en esta entrada: <strong>{most_detections['model']}</strong> — {most_detections.get('recognized_classes', 'sin detalle')}.</li>",
+            f"<li>{complexity_sentence} GFLOPs es proxy; tiempo real se decide con latencia/FPS.</li>",
+            f"<li>{theory_sentence}</li>",
         ]
         body = "<ul>" + "".join(bullets) + "</ul>"
     else:
         body = (
             f"<p>Menor latencia: <strong>{fastest['model']}</strong> — {fastest['latency_mean_ms']} ms por frame.</p>\n"
             f"<p>Mayor FPS: <strong>{highest_fps['model']}</strong> — {highest_fps['fps_effective']} FPS.</p>\n"
-            f"<p>{complexity_sentence} La conclusión cruza teoría, GFLOPs y tiempo real.</p>"
+            f"<p>Más detecciones en esta entrada: <strong>{most_detections['model']}</strong> — {most_detections.get('recognized_classes', 'sin detalle')}.</p>\n"
+            f"<p>{complexity_sentence} GFLOPs es proxy; tiempo real se decide con latencia/FPS.</p>\n"
+            f"<p>{theory_sentence}</p>"
         )
 
     st.markdown(
@@ -899,6 +1059,30 @@ def render_result_interpretation(df: pd.DataFrame, presentation_mode: bool = Fal
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_detection_summary(df: pd.DataFrame) -> None:
+    if df.empty or "recognized_classes" not in df.columns:
+        return
+    st.markdown("<h3 class='section-title'>Reconocimiento por modelo</h3>", unsafe_allow_html=True)
+    st.caption(
+        "Esto no reemplaza mAP: es una lectura cualitativa de la imagen usada en el benchmark. "
+        "Sirve para explicar falsos negativos, detecciones débiles y diferencias entre familias."
+    )
+    cols = st.columns(min(3, len(df)))
+    for col, (_, row) in zip(cols, df.iterrows(), strict=False):
+        with col:
+            confidence = row.get("avg_confidence")
+            confidence_text = "—" if pd.isna(confidence) else f"{float(confidence):.2f}"
+            render_card(
+                str(row.get("model", "Modelo")),
+                (
+                    f"<strong>Detectó:</strong> {row.get('recognized_classes', 'Sin detecciones')}<br>"
+                    f"<strong>Principal:</strong> {row.get('top_detection', '—')}<br>"
+                    f"<strong>Confianza media:</strong> {confidence_text}"
+                ),
+                "green" if row.get("family") == "CNN one-stage" else "blue" if row.get("family") == "YOLO" else "amber",
+            )
 
 
 def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, presentation_mode: bool = False) -> None:
@@ -913,6 +1097,7 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, pres
 
     metric_cards(df, presentation_mode)
     render_result_interpretation(df, presentation_mode)
+    render_detection_summary(df)
 
     st.markdown("<h3 class='section-title'>Resumen comparativo</h3>", unsafe_allow_html=True)
     st.dataframe(compact_results_table(df), width="stretch", hide_index=True)
@@ -925,7 +1110,8 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, pres
 
     if csv_path:
         csv_name = Path(csv_path).name
-        st.success(f"CSV guardado en results/{csv_name}")
+        st.success(f"CSV generado: {csv_name}")
+        st.caption(f"Ruta local: {csv_path}")
 
     csv_bytes = df.to_csv(index=False).encode("utf-8")
     st.download_button(
@@ -950,7 +1136,7 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, pres
                     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
                     spec = MODEL_CATALOG.get(model_key)
                     model_name = spec.display_name if spec else model_key
-                    st.image(frame_rgb, caption=f"{model_name}", channels="RGB", use_container_width=True)
+                    st.image(frame_rgb, caption=f"{model_name}", channels="RGB", width="stretch")
                 except Exception:
                     pass
     else:
@@ -964,8 +1150,9 @@ def render_controls_guide() -> None:
     )
 
     rows = [
-        ("Modelos a comparar", "Elige qué detectores se miden. Sirve para contrastar familias: YOLO, SSDlite y Faster R-CNN."),
-        ("Fuente de frames", "Define de dónde salen las imágenes: demo, imagen, video o webcam. Sirve para controlar el escenario de prueba."),
+        ("Ruta de comparación", "Elige la historia del experimento: antiguo → YOLO, escalado YOLO, demo gestos o selección manual."),
+        ("Modelos a comparar", "En modo personalizado elige detectores manualmente. Para clase, compara al menos un baseline antiguo con YOLO."),
+        ("Fuente de frames", "Define de dónde salen las imágenes. La demo persona/perro/fruta sirve para reconocimiento; la sintética solo para tiempo."),
         ("Dispositivo", "Permite medir en CPU o GPU. Sirve para separar el diseño del modelo del hardware usado."),
         ("Perfil de prueba", "Configura valores iniciales. 'Rápida' valida que todo funcione; 'Presentación' es equilibrada; 'Completa' mide con más estabilidad."),
         ("Resolución", "Aumenta o reduce el tamaño de entrada. Sirve para ver cómo crece n = H × W en la complejidad."),
@@ -991,36 +1178,50 @@ render_hero(True)
 with st.sidebar:
     st.markdown("### Configuración del benchmark")
 
-    default_models = [key for key, spec in MODEL_CATALOG.items() if spec.default_enabled]
-    selected_models = st.multiselect(
-        "Modelos a comparar",
-        options=list(MODEL_CATALOG.keys()),
-        default=default_models,
-        format_func=lambda key: MODEL_CATALOG[key].display_name,
-        help="Selecciona al menos dos modelos para comparar tiempo y complejidad. YOLO11n + SSDlite es una prueba rápida.",
+    comparison_route = st.radio(
+        "Ruta de comparación",
+        options=[
+            "YOLO actual en vivo",
+            "Comparación CNN vs YOLO",
+        ],
+        help="Primero mostrás YOLO en vivo; después comparás contra modelos CNN para probar la teoría.",
     )
+    st.caption(PRESET_HELP[comparison_route])
 
+    selected_models = PRESET_MODELS[comparison_route]
+    st.markdown("**Modelos de la ruta:**")
+    for index, key in enumerate(selected_models, start=1):
+        st.caption(f"{index}. {MODEL_CATALOG[key].display_name}")
+
+    source_options = list(SOURCE_HELP.keys())
+    default_source = "Webcam OpenCV local" if comparison_route == "YOLO actual en vivo" else "Demo persona/perro/fruta"
     source_kind = st.selectbox(
         "Fuente de frames",
-        list(SOURCE_HELP.keys()),
+        source_options,
+        index=source_options.index(default_source),
         help="Define de dónde salen los frames usados en el benchmark.",
     )
 
     streaming_mode = False
     if source_kind == "Webcam OpenCV local":
-        st.number_input("Índice de cámara", min_value=0, max_value=5, value=0, key="camera_index")
-        streaming_mode = st.checkbox("Modo streaming en vivo", value=False)
-
-    device = st.selectbox("Dispositivo de ejecución", list(DEVICE_HELP.keys()), help="Controla si se usa CPU o GPU.")
-
-    imgsz = st.select_slider(
-        "Resolución cuadrada",
-        options=[320, 416, 512, 640],
-        value=416,
-        help="Mayor resolución procesa más píxeles. Eso sube el costo aproximado n = H × W.",
-    )
+        streaming_mode = st.checkbox(
+            "Modo streaming en vivo",
+            value=comparison_route == "YOLO actual en vivo",
+            help="Procesar frames de cámara en tiempo real.",
+        )
 
     with st.expander("Configuración avanzada"):
+        if source_kind == "Webcam OpenCV local":
+            st.number_input("Índice de cámara", min_value=0, max_value=5, value=0, key="camera_index")
+
+        device = st.selectbox("Dispositivo de ejecución", list(DEVICE_HELP.keys()), help="Controla si se usa CPU o GPU.")
+
+        imgsz = st.select_slider(
+            "Resolución cuadrada",
+            options=[320, 416, 512, 640],
+            value=416,
+            help="Mayor resolución procesa más píxeles. Eso sube el costo aproximado n = H × W.",
+        )
         warmup_frames = st.number_input(
             "Frames de calentamiento",
             min_value=0,
@@ -1064,72 +1265,27 @@ with st.sidebar:
 
         pass
 
-inicio_tab, benchmark_tab, teoria_tab = st.tabs(
-    ["Inicio", "Benchmark", "Teoría"]
+inicio_tab, benchmark_tab = st.tabs(
+    ["Inicio", "Benchmark"]
 )
 
 with inicio_tab:
-    st.markdown("<h2 class='section-title'>Qué hace este recurso</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 class='section-title'>Ruta de comparación</h2>", unsafe_allow_html=True)
     render_model_overview()
-    st.markdown("<h2 class='section-title'>Flujo de uso</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 class='section-title'>Uso rápido</h2>", unsafe_allow_html=True)
     render_explanation_flow()
-    st.markdown("<h2 class='section-title'>Cómo leer los resultados</h2>", unsafe_allow_html=True)
-    render_metric_glossary()
-
-with teoria_tab:
-    st.markdown("<h2 class='section-title'>Parámetro específico de complejidad</h2>", unsafe_allow_html=True)
-    left, right = st.columns([1.25, 1])
-    with left:
-        st.markdown(
-            r"""
-El costo dominante en YOLO y en detectores CNN suele venir de las convoluciones:
-
-```text
-O(Σ_l H_l × W_l × C_in_l × C_out_l × K_l²)
-```
-
-Versión didáctica si definimos `n = H × W`:
-
-```text
-O(L × n × C_in × C_out × K²)
-```
-
-La lectura práctica es directa: si sube la resolución, sube `n`; si suben canales o capas, sube el costo por frame.
-            """
-        )
-    with right:
-        render_card(
-            "Postprocesamiento",
-            "Con NMS tradicional, comparar y filtrar cajas candidatas puede crecer como O(B²). B representa las cajas candidatas antes del filtrado final.",
-            "violet",
-        )
-        st.write("")
-        render_card(
-            "Detectores two-stage",
-            "Faster R-CNN agrega regiones propuestas: O(Σ conv + R × C_roi + NMS). R es el número de regiones evaluadas.",
-            "amber",
-        )
-    st.info(
-        "Big-O explica crecimiento teórico. Latencia, FPS y GFLOPs muestran lo que realmente ocurre en esta máquina."
-    )
-
-    st.markdown("<h2 class='section-title'>Catálogo de modelos</h2>", unsafe_allow_html=True)
-    with st.expander("Guía de controles", expanded=False):
-        render_controls_guide()
-
-    with st.expander("Sistema y exportación", expanded=False):
-        st.markdown("<h2 class='section-title'>Hardware y entorno local</h2>", unsafe_allow_html=True)
-        st.write("Estos datos importan porque el benchmark no es universal: depende del equipo donde se ejecuta.")
-        st.json(system_info_dict())
-        st.write(f"Directorio de exportación: `{default_export_dir()}`")
+    with st.expander("Ver glosario de métricas"):
+        render_metric_glossary()
 
 with benchmark_tab:
-    st.markdown("<h2 class='section-title'>Ejecución del benchmark</h2>", unsafe_allow_html=True)
-    st.caption("Abrí el panel lateral para cambiar modelos, fuente, dispositivo o resolución. La configuración actual se resume abajo.")
+    title = "YOLO actual en vivo" if streaming_mode else "Benchmark de tiempo y complejidad"
+    st.markdown(f"<h2 class='section-title'>{title}</h2>", unsafe_allow_html=True)
+    st.caption("¿Cuánto tarda por frame y cómo crece el costo cuando aumenta n = H×W?")
+    render_benchmark_focus(int(imgsz), streaming_mode, comparison_route)
     render_config_summary(selected_models, source_kind, device, int(imgsz), int(warmup_frames), int(measure_frames), include_complexity, True)
     
     # Opción de streaming para webcam
-    run = st.button("Iniciar Streaming" if streaming_mode else "Ejecutar benchmark", type="primary")
+    run = st.button("Iniciar YOLO en vivo" if streaming_mode else "Ejecutar comparación", type="primary")
     
     total_needed = int(warmup_frames + measure_frames)
 
@@ -1150,26 +1306,31 @@ with benchmark_tab:
         preview_detect_col = st.columns(1)[0]
         with preview_detect_col:
             if st.button("Ver detección en preview", key="preview_detection_btn"):
-                model_key = selected_models[0]
-                try:
-                    loaded = cached_load_model(model_key, device)
-                    if loaded.spec.backend == "ultralytics":
-                        results = loaded.model.predict(
-                            source=preview,
-                            imgsz=int(imgsz),
-                            conf=float(confidence),
-                            iou=float(iou),
-                            device=device,
-                            verbose=False,
-                        )
-                        annotated_frame = results[0].plot()
-                        annotated_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-                        detections_count = len(getattr(results[0], "boxes", []) or [])
-                        st.image(annotated_rgb, caption=f"Detección: {detections_count} objetos encontrados", channels="RGB", use_container_width=True)
-                    else:
-                        st.info("El preview con detecciones visual solo está disponible para modelos YOLO (Ultralytics).")
-                except Exception as e:
-                    st.error(f"Error al cargar modelo o inferir preview: {e}")
+                preview_config = BenchmarkConfig(
+                    imgsz=int(imgsz),
+                    warmup_frames=0,
+                    measure_frames=1,
+                    confidence=float(confidence),
+                    iou=float(iou),
+                )
+                st.caption("Preview rápido: una inferencia por modelo sobre la imagen actual.")
+                cols = st.columns(min(3, len(selected_models)))
+                for col, model_key in zip(cols, selected_models, strict=False):
+                    spec = MODEL_CATALOG[model_key]
+                    with col:
+                        try:
+                            loaded = cached_load_model(model_key, device)
+                            timing, annotated_bgr = run_frame(loaded, preview, preview_config)
+                            annotated_rgb = cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB)
+                            labels = ", ".join(timing.detection_labels) if timing.detection_labels else "sin detecciones"
+                            st.image(
+                                annotated_rgb,
+                                caption=f"{spec.display_name}: {timing.detections} detecciones — {labels}",
+                                channels="RGB",
+                                width="stretch",
+                            )
+                        except Exception as e:
+                            st.error(f"{spec.display_name}: {e}")
 
     if run:
         if not selected_models:
@@ -1220,7 +1381,7 @@ with benchmark_tab:
                         "latency_median_ms": round(streaming_results["latency_median_ms"], 3),
                         "latency_min_ms": round(streaming_results["latency_min_ms"], 3),
                         "latency_max_ms": round(streaming_results["latency_max_ms"], 3),
-                        "latency_p95_ms": round(streaming_results["latency_max_ms"], 3), 
+                        "latency_p95_ms": round(streaming_results.get("latency_p95_ms", streaming_results["latency_max_ms"]), 3), 
                         "fps_effective": round(streaming_results["fps_effective"], 3),
                         "preprocess_mean_ms": round(streaming_results["preprocess_mean_ms"], 3),
                         "inference_mean_ms": round(streaming_results["inference_mean_ms"], 3),
@@ -1268,6 +1429,7 @@ with benchmark_tab:
             rows = []
             progress = st.progress(0)
             status = st.empty()
+            st.session_state["annotated_frames"] = {}
 
             for index, model_key in enumerate(selected_models, start=1):
                 spec = MODEL_CATALOG[model_key]
@@ -1327,7 +1489,7 @@ with benchmark_tab:
             "latency_median_ms": round(res["latency_median_ms"], 3),
             "latency_min_ms": round(res["latency_min_ms"], 3),
             "latency_max_ms": round(res["latency_max_ms"], 3),
-            "latency_p95_ms": round(res["latency_max_ms"], 3), 
+            "latency_p95_ms": round(res.get("latency_p95_ms", res["latency_max_ms"]), 3), 
             "fps_effective": round(res["fps_effective"], 3),
             "preprocess_mean_ms": round(res["preprocess_mean_ms"], 3),
             "inference_mean_ms": round(res["inference_mean_ms"], 3),
@@ -1357,11 +1519,14 @@ with benchmark_tab:
         render_benchmark_results(df, str(export_path), True)
 
     elif "last_benchmark_df" in st.session_state:
-        st.info("Mostrando el último benchmark ejecutado. Puedes descargar CSV/HTML sin volver a medir.")
+        st.info("Mostrando el último benchmark ejecutado. Podés descargar CSV sin volver a medir.")
         render_benchmark_results(
             st.session_state["last_benchmark_df"],
             st.session_state.get("last_benchmark_csv_path"),
             True,
         )
     else:
-        st.info("Ejecuta el benchmark para generar tabla, gráficos y descargas.")
+        if streaming_mode:
+            st.info("Iniciá YOLO en vivo para ver latencia, FPS y detecciones sobre la cámara.")
+        else:
+            st.info("Ejecutá la comparación para generar tabla, gráficos y CSV.")

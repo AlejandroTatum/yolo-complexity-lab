@@ -13,8 +13,8 @@ from yolo_complexity_lab.system_info import system_info_dict
 
 
 def main() -> int:
-    assert len(MODEL_CATALOG) == 4, "Debe haber cuatro modelos planificados."
-    required = {"yolo11n", "yolo11s", "ssdlite_mobilenet_v3", "fasterrcnn_mobilenet_fpn"}
+    assert len(MODEL_CATALOG) == 5, "Debe haber cinco modelos planificados, incluyendo la demo local opcional."
+    required = {"yolov8_gestures", "yolo11n", "yolo11s", "ssdlite_mobilenet_v3", "fasterrcnn_mobilenet_fpn"}
     assert required.issubset(MODEL_CATALOG), "Catálogo incompleto."
     for row in catalog_rows():
         assert "O(" in row["Big-O inferencia"], row
@@ -22,6 +22,7 @@ def main() -> int:
     root = find_workspace_root(ROOT)
     export_dir = default_export_dir()
     assert root.exists(), root
+    assert (ROOT / "assets" / "demo_person_dog_fruit.jpg").exists(), "Falta imagen demo persona/perro/fruta."
     assert "PROYECTO001_YOLO_COMPLEXITY_LAB_Alejandro_Padilla" in str(export_dir)
     info = system_info_dict()
     assert "python" in info

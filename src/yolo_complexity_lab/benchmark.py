@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import statistics
 import time
+from collections import Counter
 from dataclasses import dataclass
 from typing import Iterable, Callable
 
@@ -27,6 +28,8 @@ class FrameTiming:
     postprocess_ms: float
     total_ms: float
     detections: int
+    detection_labels: tuple[str, ...] = ()
+    detection_confidences: tuple[float, ...] = ()
 
 
 def _percentile(values: list[float], percentile: float) -> float | None:
@@ -54,7 +57,61 @@ def _resize_rgb(frame_rgb: object, imgsz: int) -> object:
     return cv2.resize(frame_rgb, (imgsz, imgsz), interpolation=cv2.INTER_LINEAR)
 
 
-# MODIFICACIÓN: Ahora retorna una tupla (FrameTiming, imagen_anotada)
+def _class_name(loaded: LoadedModel, class_id: int) -> str:
+    names = loaded.class_names
+    try:
+        if isinstance(names, dict):
+            return str(names.get(class_id, f"clase_{class_id}"))
+        if isinstance(names, (list, tuple)) and 0 <= class_id < len(names):
+            return str(names[class_id])
+    except Exception:
+        pass
+    return f"clase_{class_id}"
+
+
+def _summarize_detection_names(labels: list[str]) -> str:
+    if not labels:
+        return "Sin detecciones"
+    counts = Counter(labels)
+    return ", ".join(f"{label} ({count})" for label, count in counts.most_common())
+
+
+def _draw_torchvision_detections(frame_rgb: object, outputs: dict, loaded: LoadedModel, confidence: float) -> object:
+    """Draw torchvision detections and return a BGR image for Streamlit display."""
+    import cv2
+
+    annotated_rgb = frame_rgb.copy()
+    boxes = outputs.get("boxes", [])
+    labels = outputs.get("labels", [])
+    scores = outputs.get("scores", [])
+
+    try:
+        iterable = zip(boxes.detach().cpu().numpy(), labels.detach().cpu().numpy(), scores.detach().cpu().numpy(), strict=False)
+    except Exception:
+        iterable = []
+
+    for box, class_id, score in iterable:
+        if float(score) < confidence:
+            continue
+        x1, y1, x2, y2 = [int(v) for v in box]
+        name = _class_name(loaded, int(class_id))
+        color = (125, 211, 252)
+        cv2.rectangle(annotated_rgb, (x1, y1), (x2, y2), color, 2)
+        label = f"{name} {float(score):.2f}"
+        cv2.rectangle(annotated_rgb, (x1, max(0, y1 - 22)), (x1 + min(220, 9 * len(label)), y1), color, -1)
+        cv2.putText(
+            annotated_rgb,
+            label,
+            (x1 + 4, max(15, y1 - 6)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (2, 6, 23),
+            1,
+            cv2.LINE_AA,
+        )
+    return cv2.cvtColor(annotated_rgb, cv2.COLOR_RGB2BGR)
+
+
 def run_yolo_frame(loaded: LoadedModel, frame_rgb: object, config: BenchmarkConfig) -> tuple[FrameTiming, object]:
     start_total = time.perf_counter()
     start_pre = time.perf_counter()
@@ -81,20 +138,29 @@ def run_yolo_frame(loaded: LoadedModel, frame_rgb: object, config: BenchmarkConf
     inference_ms = measured_model_ms
     postprocess_ms = 0.0
     detections = 0
+    labels: list[str] = []
+    confidences: list[float] = []
     try:
         speed = getattr(results[0], "speed", {}) or {}
         preprocess_ms = float(speed.get("preprocess", preprocess_ms))
         inference_ms = float(speed.get("inference", measured_model_ms))
         postprocess_ms = float(speed.get("postprocess", 0.0))
-        detections = len(getattr(results[0], "boxes", []) or [])
+        boxes = getattr(results[0], "boxes", None)
+        detections = len(boxes) if boxes is not None else 0
+        if boxes is not None:
+            cls_values = getattr(boxes, "cls", [])
+            conf_values = getattr(boxes, "conf", [])
+            for class_id in cls_values:
+                labels.append(_class_name(loaded, int(class_id.item() if hasattr(class_id, "item") else class_id)))
+            for score in conf_values:
+                confidences.append(float(score.item() if hasattr(score, "item") else score))
     except Exception:
         pass
 
     total_ms = (time.perf_counter() - start_total) * 1000
-    return FrameTiming(preprocess_ms, inference_ms, postprocess_ms, total_ms, detections), annotated_frame
+    return FrameTiming(preprocess_ms, inference_ms, postprocess_ms, total_ms, detections, tuple(labels), tuple(confidences)), annotated_frame
 
 
-# MODIFICACIÓN: Retorna tupla para coincidir con la firma
 def run_torchvision_frame(loaded: LoadedModel, frame_rgb: object, config: BenchmarkConfig) -> tuple[FrameTiming, object]:
     import torch
 
@@ -120,9 +186,23 @@ def run_torchvision_frame(loaded: LoadedModel, frame_rgb: object, config: Benchm
         pass
     postprocess_ms = (time.perf_counter() - start_post) * 1000
     total_ms = (time.perf_counter() - start_total) * 1000
-    
-    # Retornamos el frame original ya que torchvision no tiene un .plot() directo
-    return FrameTiming(preprocess_ms, inference_ms, postprocess_ms, total_ms, detections), resized
+    labels: list[str] = []
+    confidences: list[float] = []
+    try:
+        output = outputs[0]
+        scores = output.get("scores", [])
+        class_ids = output.get("labels", [])
+        keep = scores >= config.confidence
+        for class_id in class_ids[keep].detach().cpu().tolist():
+            labels.append(_class_name(loaded, int(class_id)))
+        confidences = [float(v) for v in scores[keep].detach().cpu().tolist()]
+        annotated_frame = _draw_torchvision_detections(resized, output, loaded, config.confidence)
+    except Exception:
+        import cv2
+
+        annotated_frame = cv2.cvtColor(resized, cv2.COLOR_RGB2BGR)
+
+    return FrameTiming(preprocess_ms, inference_ms, postprocess_ms, total_ms, detections, tuple(labels), tuple(confidences)), annotated_frame
 
 
 def run_frame(loaded: LoadedModel, frame_rgb: object, config: BenchmarkConfig) -> tuple[FrameTiming, object]:
@@ -169,6 +249,13 @@ def benchmark_model(
     inference = [t.inference_ms for t in timings]
     postprocess = [t.postprocess_ms for t in timings]
     detections = [t.detections for t in timings]
+    detection_labels = [label for timing in timings for label in timing.detection_labels]
+    detection_confidences = [score for timing in timings for score in timing.detection_confidences]
+    representative_labels = list(timings[-1].detection_labels) if timings else []
+    representative_confidences = list(timings[-1].detection_confidences) if timings else []
+    label_counts = Counter(representative_labels)
+    top_detection = label_counts.most_common(1)[0][0] if label_counts else "Sin detecciones"
+    recognized_classes = _summarize_detection_names(representative_labels)
     total_seconds = sum(totals) / 1000
     fps = len(totals) / total_seconds if total_seconds > 0 else None
 
@@ -193,6 +280,11 @@ def benchmark_model(
         "inference_mean_ms": round(statistics.mean(inference), 3),
         "postprocess_mean_ms": round(statistics.mean(postprocess), 3),
         "detections_mean": round(statistics.mean(detections), 3),
+        "detections_total": int(sum(detections)),
+        "recognized_classes": recognized_classes,
+        "top_detection": top_detection,
+        "avg_confidence": round(statistics.mean(representative_confidences), 3) if representative_confidences else None,
+        "avg_confidence_all_frames": round(statistics.mean(detection_confidences), 3) if detection_confidences else None,
         "parameters": loaded.parameter_count,
         "parameters_millions": round(loaded.parameter_count / 1e6, 3) if loaded.parameter_count is not None else None,
         "model_size_mb": loaded.model_size_mb,

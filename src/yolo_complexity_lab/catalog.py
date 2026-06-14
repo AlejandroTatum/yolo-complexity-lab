@@ -46,6 +46,7 @@ class ModelSpec:
     didactic_big_o: str
     postprocess_big_o: str
     complexity_note: str
+    story_role: str
     default_enabled: bool = True
 
 
@@ -57,12 +58,9 @@ TWO_STAGE_BIG_O = "O(Σ conv + R × C_roi + NMS), con R = regiones propuestas"
 
 
 MODEL_CATALOG: dict[str, ModelSpec] = {
-    # ---------------------------------------------------------
-    # ¡NUEVO MODELO! YOLOv8 Extra Grande (Gestos)
-    # ---------------------------------------------------------
     "yolov8_gestures": ModelSpec(
         key="yolov8_gestures",
-        display_name="YOLOv8x Gestos — Demo",
+        display_name="YOLOv8x Gestos — opcional",
         family="YOLO",
         backend="ultralytics",
         weight_name=_BEST_PT_PATH,
@@ -74,7 +72,8 @@ MODEL_CATALOG: dict[str, ModelSpec] = {
             "Modelo Extra Grande (YOLOv8x) afinado para gestos. Mantiene O(1) pasada, "
             "pero su enorme cantidad de parámetros aumenta drásticamente la constante de tiempo C."
         ),
-        default_enabled=True,
+        story_role="Demo personalizada: muestra cómo un YOLO entrenado para gestos puede ser más pesado que un nano generalista.",
+        default_enabled=False,
     ),
     "yolo11n": ModelSpec(
         key="yolo11n",
@@ -93,6 +92,7 @@ MODEL_CATALOG: dict[str, ModelSpec] = {
             "dominante viene de convoluciones; NMS agrega costo cuadrático "
             "sobre cajas candidatas."
         ),
+        story_role="YOLO moderno: representa la optimización hacia tiempo real con baja latencia y pocos parámetros.",
     ),
     "yolo11s": ModelSpec(
         key="yolo11s",
@@ -108,6 +108,7 @@ MODEL_CATALOG: dict[str, ModelSpec] = {
             "Misma familia que YOLO11n, pero con más capacidad. Normalmente suben "
             "parámetros/GFLOPs y puede subir la latencia."
         ),
+        story_role="Escalado YOLO: sirve para comparar cómo subir tamaño del modelo aumenta capacidad y costo.",
         default_enabled=False,
     ),
     "ssdlite_mobilenet_v3": ModelSpec(
@@ -125,6 +126,7 @@ MODEL_CATALOG: dict[str, ModelSpec] = {
             "contra YOLO porque también prioriza tiempo real, aunque suele ser menos "
             "robusto en escenas complejas."
         ),
+        story_role="Baseline one-stage histórico: elimina propuestas de regiones, pero no resume toda la evolución YOLO.",
     ),
     "fasterrcnn_mobilenet_fpn": ModelSpec(
         key="fasterrcnn_mobilenet_fpn",
@@ -141,6 +143,7 @@ MODEL_CATALOG: dict[str, ModelSpec] = {
             "Eso mejora flexibilidad, pero agrega costo por región R y suele penalizar "
             "la latencia frente a detectores one-stage."
         ),
+        story_role="Baseline clásico: muestra el costo extra de las propuestas de región frente a la pasada única de YOLO.",
         default_enabled=False,
     ),
 }
@@ -156,6 +159,7 @@ def catalog_rows() -> list[dict[str, str]]:
             "Big-O inferencia": spec.inference_big_o,
             "Big-O didáctico": spec.didactic_big_o,
             "Big-O postproceso": spec.postprocess_big_o,
+            "rol en la demo": spec.story_role,
             "nota": spec.complexity_note,
         }
         for spec in MODEL_CATALOG.values()
