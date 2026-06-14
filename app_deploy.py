@@ -383,30 +383,53 @@ button[data-testid="stSidebarNav"] {
   display: none !important;
 }
 
-/* Forzar sidebar nativo a mantenerse expandido con ancho fijo */
-[data-testid="stSidebar"] {
-  transform: none !important;
-  transition: none !important;
-  margin-left: 0 !important;
-  width: 260px !important;
-  min-width: 260px !important;
-  max-width: 260px !important;
-}
-
-/* Ajustar el contenedor principal para respetar el ancho del sidebar */
-[data-testid="stAppViewContainer"] > section.main {
-  margin-left: 260px !important;
-}
-
-/* En móvil reducir sidebar */
-@media (max-width: 760px) {
-  [data-testid="stSidebar"] {
-    width: 200px !important;
-    min-width: 200px !important;
-    max-width: 200px !important;
+/* DESKTOP: Sidebar fijo siempre expandido */
+@media (min-width: 761px) {
+  /* Ocultar botón hamburguesa en desktop */
+  button[data-testid="stSidebarNav"] {
+    display: none !important;
   }
+  
+  /* Forzar sidebar expandido */
+  [data-testid="stSidebar"] {
+    transform: none !important;
+    transition: none !important;
+    margin-left: 0 !important;
+    width: 260px !important;
+    min-width: 260px !important;
+    max-width: 260px !important;
+  }
+  
+  /* Ajustar contenido principal */
   [data-testid="stAppViewContainer"] > section.main {
-    margin-left: 200px !important;
+    margin-left: 260px !important;
+  }
+}
+
+/* MOBILE: Sidebar colapsable normal */
+@media (max-width: 760px) {
+  /* Mostrar botón hamburguesa */
+  button[data-testid="stSidebarNav"] {
+    display: block !important;
+  }
+  
+  /* Permitir colapso del sidebar */
+  [data-testid="stSidebar"] {
+    width: auto !important;
+    min-width: auto !important;
+    max-width: none !important;
+    transform: none !important;
+    transition: transform 0.3s ease !important;
+  }
+  
+  /* Resetear margen en mobile */
+  [data-testid="stAppViewContainer"] > section.main {
+    margin-left: 0 !important;
+  }
+  
+  /* Cuando sidebar está colapsado en mobile */
+  [data-testid="stSidebar"][aria-expanded="false"] {
+    transform: translateX(-100%) !important;
   }
 }
 
