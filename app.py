@@ -1271,11 +1271,23 @@ with st.sidebar:
     if IS_CLOUD:
         st.info("🔒 **Modo deploy activo.** Webcam y streaming no disponibles en el navegador. Usa *Demo* o *Subir imagen*.", icon="ℹ️")
     
+    # Detectar cambio de ruta para limpiar resultados viejos
+    previous_route = st.session_state.get("comparison_route", None)
+    
     comparison_route = st.radio(
         "Ruta de comparación",
         options=list(PRESET_MODELS.keys()),
         help="Comparar detectores por tiempo y precisión." if IS_CLOUD else "Primero mostrás YOLO en vivo; después comparás contra modelos CNN para probar la teoría.",
     )
+    
+    # Si cambió la ruta, limpiar resultados previos
+    if previous_route is not None and previous_route != comparison_route:
+        st.session_state.pop("last_benchmark_df", None)
+        st.session_state.pop("last_benchmark_csv_path", None)
+        st.session_state.pop("annotated_frames", None)
+        st.session_state.pop("pending_streaming_results", None)
+    
+    st.session_state["comparison_route"] = comparison_route
     st.caption(PRESET_HELP[comparison_route])
 
     selected_models = PRESET_MODELS[comparison_route]
@@ -1426,11 +1438,29 @@ with benchmark_tab:
                 )
                 
                 if streaming_results:
-                    st.success("Streaming finalizado. Generando gráficas...")
+                    st.success("Streaming finalizado. Resumen del rendimiento:")
                     
+                    # Mostrar resumen simple del streaming (no tabla de comparación)
                     from yolo_complexity_lab.complexity import estimate_for_loaded_model
                     complexity = estimate_for_loaded_model(loaded, int(imgsz)) if include_complexity else None
                     
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Latencia promedio", f"{round(streaming_results['latency_mean_ms'], 1)} ms")
+                        st.metric("FPS efectivo", f"{round(streaming_results['fps_effective'], 1)}")
+                    with col2:
+                        st.metric("Frames medidos", streaming_results["frames_measured"])
+                        st.metric("Detecciones promedio", f"{round(streaming_results['detections_mean'], 1)}")
+                    with col3:
+                        st.metric("Preprocesamiento", f"{round(streaming_results['preprocess_mean_ms'], 1)} ms")
+                        st.metric("Inferencia", f"{round(streaming_results['inference_mean_ms'], 1)} ms")
+                    
+                    if complexity:
+                        st.write(f"**Complejidad:** {complexity.gflops_approx} GFLOPs | {complexity.gmacs} GMACs | {complexity.conv_layers} capas Conv")
+                    
+                    st.write(f"**Modelo:** {spec.display_name} | **Dispositivo:** {device} | **Resolución:** {imgsz}px")
+                    
+                    # Solo guardar para referencia, no mostrar como comparación
                     row = {
                         "model_key": spec.key,
                         "model": spec.display_name,
@@ -1470,8 +1500,6 @@ with benchmark_tab:
                     export_path = write_results_csv(df)
                     st.session_state["last_benchmark_df"] = df
                     st.session_state["last_benchmark_csv_path"] = str(export_path)
-                    
-                    render_benchmark_results(df, str(export_path), True)
                     
             except Exception as exc:
                 st.error(f"Error en streaming: {exc}")
