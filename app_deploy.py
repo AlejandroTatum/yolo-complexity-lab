@@ -529,17 +529,16 @@ def source_frames(source_kind: str, total_needed: int, imgsz: int) -> tuple[list
             if uploaded is None:
                 st.info("Sube una imagen o cambia a 'Demo persona/perro/fruta' para una prueba rápida.")
                 return [], None
-            # Cache the uploaded file for the benchmark run
-            st.session_state["uploaded_image_file"] = uploaded
+            # Cache the decoded frame for the benchmark run
             frame = read_image_file(uploaded)
+            st.session_state["uploaded_image_frame"] = frame
             return repeat_frame(frame, total_needed), frame
         else:
-            # Reuse cached file from preview call
-            uploaded = st.session_state.get("uploaded_image_file")
-            if uploaded is None:
+            # Reuse cached frame from preview call
+            frame = st.session_state.get("uploaded_image_frame")
+            if frame is None:
                 st.error("Primero subí una imagen en el preview.")
                 return [], None
-            frame = read_image_file(uploaded)
             return repeat_frame(frame, total_needed), frame
 
     frame = sample_coco_frame()
