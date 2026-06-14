@@ -2,8 +2,20 @@ from __future__ import annotations
 
 import base64
 import cv2
+import os
 import sys
 from pathlib import Path
+
+
+def is_streamlit_cloud() -> bool:
+    """Detectar si la app corre en Streamlit Cloud (no local)."""
+    server_url = os.environ.get("STREAMLIT_SERVER_URL", "")
+    return bool(server_url) and "localhost" not in server_url
+
+
+# Si estamos en Streamlit Cloud, bloquear opciones que no funcionan
+# (webcam no tiene sentido en un servidor remoto)
+IS_CLOUD = is_streamlit_cloud()
 
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
@@ -34,13 +46,17 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-SOURCE_HELP = {
+# Opciones de fuente: en cloud, solo funciona Demo e Imagen (no webcam)
+SOURCE_HELP_ALL = {
     "Demo persona/perro/fruta": "Usa una lámina local con una persona, un perro y una banana para comparar reconocimiento y falsos positivos.",
     "Subir imagen": "Repite una imagen propia varias veces para medir latencia sin depender de un video.",
     "Webcam OpenCV local": "Captura frames desde la cámara local. Útil para demo en vivo, pero depende de la cámara y luz.",
 }
 
-PRESET_MODELS = {
+SOURCE_HELP = {k: v for k, v in SOURCE_HELP_ALL.items() if not IS_CLOUD or k != "Webcam OpenCV local"}
+
+# Opciones de ruta: en cloud, no funciona YOLO en vivo (necesita webcam)
+PRESET_MODELS_ALL = {
     "YOLO actual en vivo": ["yolo11n"],
     "Comparación CNN vs YOLO": [
         "fasterrcnn_mobilenet_fpn",
@@ -49,10 +65,13 @@ PRESET_MODELS = {
     ],
 }
 
-PRESET_HELP = {
+PRESET_HELP_ALL = {
     "YOLO actual en vivo": "Mostrar YOLO11n funcionando en tiempo real con webcam local.",
     "Comparación CNN vs YOLO": "Comparar dos etapas, one-stage CNN y YOLO para probar tiempo y complejidad.",
 }
+
+PRESET_MODELS = {k: v for k, v in PRESET_MODELS_ALL.items() if not IS_CLOUD or k != "YOLO actual en vivo"}
+PRESET_HELP = {k: v for k, v in PRESET_HELP_ALL.items() if not IS_CLOUD or k != "YOLO actual en vivo"}
 
 DEVICE_HELP = {
     "auto": "Usa GPU si PyTorch detecta CUDA; si no, usa CPU.",
@@ -1184,14 +1203,14 @@ render_hero(True)
 
 with st.sidebar:
     st.markdown("### Configuración del benchmark")
-
+    
+    if IS_CLOUD:
+        st.info("🔒 **Modo deploy activo.** Webcam y streaming no disponibles en el navegador. Usa *Demo* o *Subir imagen*.", icon="ℹ️")
+    
     comparison_route = st.radio(
         "Ruta de comparación",
-        options=[
-            "YOLO actual en vivo",
-            "Comparación CNN vs YOLO",
-        ],
-        help="Primero mostrás YOLO en vivo; después comparás contra modelos CNN para probar la teoría.",
+        options=list(PRESET_MODELS.keys()),
+        help="Comparar detectores por tiempo y precisión." if IS_CLOUD else "Primero mostrás YOLO en vivo; después comparás contra modelos CNN para probar la teoría.",
     )
     st.caption(PRESET_HELP[comparison_route])
 
@@ -1201,7 +1220,7 @@ with st.sidebar:
         st.caption(f"{index}. {MODEL_CATALOG[key].display_name}")
 
     source_options = list(SOURCE_HELP.keys())
-    default_source = "Webcam OpenCV local" if comparison_route == "YOLO actual en vivo" else "Demo persona/perro/fruta"
+    default_source = "Demo persona/perro/fruta" if IS_CLOUD else ("Webcam OpenCV local" if comparison_route == "YOLO actual en vivo" else "Demo persona/perro/fruta")
     source_kind = st.selectbox(
         "Fuente de frames",
         source_options,
@@ -1210,7 +1229,7 @@ with st.sidebar:
     )
 
     streaming_mode = False
-    if source_kind == "Webcam OpenCV local":
+    if not IS_CLOUD and source_kind == "Webcam OpenCV local":
         streaming_mode = st.checkbox(
             "Modo streaming en vivo",
             value=comparison_route == "YOLO actual en vivo",
@@ -1218,7 +1237,7 @@ with st.sidebar:
         )
 
     with st.expander("Configuración avanzada"):
-        if source_kind == "Webcam OpenCV local":
+        if not IS_CLOUD and source_kind == "Webcam OpenCV local":
             st.number_input("Índice de cámara", min_value=0, max_value=5, value=0, key="camera_index")
 
         device = st.selectbox("Dispositivo de ejecución", list(DEVICE_HELP.keys()), help="Controla si se usa CPU o GPU.")
