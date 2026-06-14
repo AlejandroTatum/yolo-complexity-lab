@@ -371,6 +371,11 @@ hr {
   background: transparent;
 }
 
+/* Ocultar SOLO el botón hamburguesa de toggle de la sidebar */
+button[data-testid="stSidebarNav"] {
+  display: none !important;
+}
+
 .preview-frame {
   border: 1px solid var(--line);
   border-radius: 22px;
