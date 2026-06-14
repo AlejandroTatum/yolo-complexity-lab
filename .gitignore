@@ -10,3 +10,4 @@ __pycache__/
 .streamlit/secrets.toml
 .workspace-review/
 .atl/
+annotations/
