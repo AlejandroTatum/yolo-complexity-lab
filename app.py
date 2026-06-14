@@ -1281,6 +1281,7 @@ with inicio_tab:
     render_model_overview()
     st.markdown("<h2 class='section-title'>Uso rápido</h2>", unsafe_allow_html=True)
     render_explanation_flow()
+    st.write("")
     with st.expander("Ver glosario de métricas"):
         render_metric_glossary()
 
