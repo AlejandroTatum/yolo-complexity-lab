@@ -1205,63 +1205,6 @@ with benchmark_tab:
                 render_benchmark_results(df, str(export_path), True)
             else:
                 st.warning("No se pudo medir ningún modelo. Revisa dependencias, conexión o disponibilidad de pesos.")
-    elif "pending_streaming_results" in st.session_state:
-        st.success("Streaming finalizado. Generando gráficas del rendimiento en vivo...")
-        
-        # Recuperar los datos guardados en el finally
-        res = st.session_state.pop("pending_streaming_results")
-        m_key = st.session_state.pop("pending_model_key")
-        imgsz_val = st.session_state.pop("pending_imgsz")
-        dev_val = st.session_state.pop("pending_device")
-        
-        spec = MODEL_CATALOG[m_key]
-        loaded = cached_load_model(m_key, dev_val)
-        
-        from yolo_complexity_lab.complexity import estimate_for_loaded_model
-        complexity = estimate_for_loaded_model(loaded, int(imgsz_val)) if include_complexity else None
-        
-        row = {
-            "model_key": spec.key,
-            "model": spec.display_name,
-            "family": spec.family,
-            "backend": spec.backend,
-            "device": dev_val,
-            "input_size_px": int(imgsz_val),
-            "frames_measured": res["frames_measured"],
-            "warmup_frames": 0,
-            "latency_mean_ms": round(res["latency_mean_ms"], 3),
-            "latency_median_ms": round(res["latency_median_ms"], 3),
-            "latency_min_ms": round(res["latency_min_ms"], 3),
-            "latency_max_ms": round(res["latency_max_ms"], 3),
-            "latency_p95_ms": round(res.get("latency_p95_ms", res["latency_max_ms"]), 3), 
-            "fps_effective": round(res["fps_effective"], 3),
-            "preprocess_mean_ms": round(res["preprocess_mean_ms"], 3),
-            "inference_mean_ms": round(res["inference_mean_ms"], 3),
-            "postprocess_mean_ms": round(res["postprocess_mean_ms"], 3),
-            "detections_mean": round(res["detections_mean"], 3),
-            "parameters": loaded.parameter_count,
-            "parameters_millions": round(loaded.parameter_count / 1e6, 3) if loaded.parameter_count is not None else None,
-            "model_size_mb": loaded.model_size_mb,
-            "model_size_note": loaded.size_note,
-            "macs": complexity.macs if complexity else None,
-            "gmacs_approx": complexity.gmacs if complexity else None,
-            "gflops_approx": complexity.gflops_approx if complexity else None,
-            "conv_layers_counted": complexity.conv_layers if complexity else None,
-            "linear_layers_counted": complexity.linear_layers if complexity else None,
-            "complexity_note": complexity.note if complexity else "No calculado.",
-            "big_o_inference": spec.inference_big_o,
-            "big_o_didactic": spec.didactic_big_o,
-            "big_o_postprocess": spec.postprocess_big_o,
-            "ram_delta_mb": 0.0,
-        }
-        
-        df = pd.DataFrame([row])
-        export_path = write_results_csv(df)
-        st.session_state["last_benchmark_df"] = df
-        st.session_state["last_benchmark_csv_path"] = str(export_path)
-        
-        render_benchmark_results(df, str(export_path), True)
-
     elif "last_benchmark_df" in st.session_state:
         st.info("Mostrando el último benchmark ejecutado. Podés descargar CSV sin volver a medir.")
         render_benchmark_results(
@@ -1270,4 +1213,4 @@ with benchmark_tab:
             True,
         )
     else:
-                    st.info("Ejecutá la comparación para generar tabla, gráficos y CSV.")
+        st.info("Ejecutá la comparación para generar tabla, gráficos y CSV.")
