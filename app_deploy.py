@@ -1008,30 +1008,28 @@ def render_controls_guide() -> None:
 
 inject_css()
 
-# JavaScript para prevenir colapso del sidebar
+# JavaScript para forzar sidebar en desktop (>=768px), dejar mobile nativo
 st.markdown(
     """
     <script>
-    // Prevent sidebar from collapsing
     function fixSidebar() {
+        const isDesktop = window.innerWidth >= 768;
         const sidebar = document.querySelector('[data-testid="stSidebar"]');
         const toggleButton = document.querySelector('button[data-testid="stSidebarNav"]');
         
         if (toggleButton) {
-            toggleButton.style.display = 'none';
+            toggleButton.style.display = isDesktop ? 'none' : '';
         }
         
-        if (sidebar) {
+        if (sidebar && isDesktop) {
             sidebar.style.transform = 'none';
             sidebar.style.transition = 'none';
             sidebar.style.marginLeft = '0';
         }
     }
     
-    // Run immediately
     fixSidebar();
-    
-    // Monitor for changes
+    window.addEventListener('resize', fixSidebar);
     const observer = new MutationObserver(fixSidebar);
     observer.observe(document.body, { childList: true, subtree: true });
     </script>
