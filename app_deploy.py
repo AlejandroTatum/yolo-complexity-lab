@@ -378,28 +378,19 @@ hr {
   background: transparent;
 }
 
-/* SIDEBAR: Desktop fijo, Mobile colapsable */
-/* Desktop: sidebar fijo expandido, botón oculto */
+/* SIDEBAR: Desktop fijo con ancho, Mobile nativo */
 @media (min-width: 768px) {
   button[data-testid="stSidebarNav"] {
     display: none !important;
   }
   
   [data-testid="stSidebar"] {
-    transform: none !important;
-    transition: none !important;
-    margin-left: 0 !important;
+    width: 260px !important;
+    min-width: 260px !important;
   }
 }
 
-/* Mobile: asegurar que botón hamburguesa sea visible */
-@media (max-width: 767px) {
-  button[data-testid="stSidebarNav"] {
-    display: flex !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-  }
-}
+/* Mobile: sin tocar nada, dejar nativo */
 
 .preview-frame {
   border: 1px solid var(--line);
