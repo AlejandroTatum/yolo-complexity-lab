@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import cv2
 import statistics
 import time
 from collections import Counter
@@ -10,6 +11,10 @@ import psutil
 
 from .complexity import ComplexityEstimate, estimate_for_loaded_model
 from .loaders import LoadedModel
+
+
+DETECTION_ORANGE_BGR = (0, 102, 255)
+DETECTION_TEXT_BGR = (255, 255, 255)
 
 
 @dataclass(frozen=True)
@@ -77,10 +82,15 @@ def _summarize_detection_names(labels: list[str]) -> str:
 
 
 def _draw_torchvision_detections(frame_rgb: object, outputs: dict, loaded: LoadedModel, confidence: float) -> object:
-    """Draw torchvision detections and return a BGR image for Streamlit display."""
+    """Draw torchvision detections and return a BGR image.
+
+    The app converts this BGR result to RGB immediately before calling
+    ``st.image``. Keeping one explicit convention prevents the blue tint caused
+    by mixing OpenCV's BGR arrays with Streamlit's RGB rendering.
+    """
     import cv2
 
-    annotated_rgb = frame_rgb.copy()
+    annotated_bgr = cv2.cvtColor(frame_rgb.copy(), cv2.COLOR_RGB2BGR)
     boxes = outputs.get("boxes", [])
     labels = outputs.get("labels", [])
     scores = outputs.get("scores", [])
@@ -95,21 +105,20 @@ def _draw_torchvision_detections(frame_rgb: object, outputs: dict, loaded: Loade
             continue
         x1, y1, x2, y2 = [int(v) for v in box]
         name = _class_name(loaded, int(class_id))
-        color = (125, 211, 252)
-        cv2.rectangle(annotated_rgb, (x1, y1), (x2, y2), color, 2)
+        cv2.rectangle(annotated_bgr, (x1, y1), (x2, y2), DETECTION_ORANGE_BGR, 2)
         label = f"{name} {float(score):.2f}"
-        cv2.rectangle(annotated_rgb, (x1, max(0, y1 - 22)), (x1 + min(220, 9 * len(label)), y1), color, -1)
+        cv2.rectangle(annotated_bgr, (x1, max(0, y1 - 22)), (x1 + min(220, 9 * len(label)), y1), DETECTION_ORANGE_BGR, -1)
         cv2.putText(
-            annotated_rgb,
+            annotated_bgr,
             label,
             (x1 + 4, max(15, y1 - 6)),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
-            (2, 6, 23),
+            DETECTION_TEXT_BGR,
             1,
             cv2.LINE_AA,
         )
-    return cv2.cvtColor(annotated_rgb, cv2.COLOR_RGB2BGR)
+    return annotated_bgr
 
 
 def run_yolo_frame(loaded: LoadedModel, frame_rgb: object, config: BenchmarkConfig) -> tuple[FrameTiming, object]:
@@ -131,9 +140,6 @@ def run_yolo_frame(loaded: LoadedModel, frame_rgb: object, config: BenchmarkConf
     _sync_if_cuda(loaded.device)
     measured_model_ms = (time.perf_counter() - start_infer) * 1000
 
-    # MODIFICACIÓN: Extraer la imagen anotada con las predicciones de YOLO
-    annotated_frame = results[0].plot()
-
     # Ultralytics exposes internal stage timings. Prefer them when available.
     inference_ms = measured_model_ms
     postprocess_ms = 0.0
@@ -154,6 +160,29 @@ def run_yolo_frame(loaded: LoadedModel, frame_rgb: object, config: BenchmarkConf
                 labels.append(_class_name(loaded, int(class_id.item() if hasattr(class_id, "item") else class_id)))
             for score in conf_values:
                 confidences.append(float(score.item() if hasattr(score, "item") else score))
+    except Exception:
+        pass
+
+    # Dibujar cajas manualmente con color naranja en BGR. No usamos
+    # results[0].plot() porque aplica la paleta por defecto de Ultralytics.
+    annotated_frame = cv2.cvtColor(resized.copy(), cv2.COLOR_RGB2BGR)
+    try:
+        boxes = getattr(results[0], "boxes", None)
+        if boxes is not None:
+            names = getattr(results[0], "names", {})
+            for box in boxes:
+                xyxy = box.xyxy.cpu().numpy().astype(int).flatten()
+                if len(xyxy) >= 4:
+                    x1, y1, x2, y2 = xyxy[:4]
+                    class_id = int(box.cls.item()) if hasattr(box.cls, "item") else int(box.cls)
+                    conf = float(box.conf.item()) if hasattr(box.conf, "item") else float(box.conf)
+                    name = names.get(class_id, "") if isinstance(names, dict) else str(class_id)
+                    label = f"{name} {conf:.2f}"
+                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), DETECTION_ORANGE_BGR, 2)
+                    (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+                    label_top = max(0, y1 - text_h - 8)
+                    cv2.rectangle(annotated_frame, (x1, label_top), (x1 + text_w + 4, y1), DETECTION_ORANGE_BGR, -1)
+                    cv2.putText(annotated_frame, label, (x1 + 2, max(14, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, DETECTION_TEXT_BGR, 1, cv2.LINE_AA)
     except Exception:
         pass
 

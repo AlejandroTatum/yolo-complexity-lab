@@ -105,6 +105,7 @@ def inject_css() -> None:
   --cyan: #0891b2;
   --green: #059669;
   --amber: #d97706;
+  --orange: #FF6600;
   --violet: #7c3aed;
   --shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
 }
@@ -275,6 +276,7 @@ p, li, span, label {
 .card-accent-blue { border-left: 4px solid var(--blue); }
 .card-accent-green { border-left: 4px solid var(--green); }
 .card-accent-amber { border-left: 4px solid var(--amber); }
+.card-accent-orange { border-left: 4px solid var(--orange); }
 .card-accent-violet { border-left: 4px solid var(--violet); }
 
 .small-label {
@@ -456,14 +458,14 @@ def dependency_warning() -> None:
 
 def render_hero(presentation_mode: bool = False) -> None:
     subtitle = (
-        "Evolución de detectores, reconocimiento y tiempo real en una demo local."
+        "Evolución de detectores, reconocimiento y complejidad en una demo web."
         if presentation_mode
         else "Compara detectores antiguos y YOLO por reconocimiento, latencia, FPS y costo computacional."
     )
     st.markdown(
         f"""
 <div class="hero">
-  <div class="hero-kicker">Laboratorio local de complejidad computacional</div>
+  <div class="hero-kicker">Laboratorio de complejidad computacional</div>
   <div class="hero-title">YOLO Complexity Lab</div>
   <div class="hero-subtitle">
     {subtitle}
@@ -474,7 +476,7 @@ def render_hero(presentation_mode: bool = False) -> None:
     <span class="pill">Qué reconoce</span>
     <span class="pill">MACs y GFLOPs</span>
     <span class="pill">Big-O por modelo</span>
-    <span class="pill">CPU o GPU local</span>
+    <span class="pill">CPU del servidor</span>
   </div>
 </div>
         """,
@@ -621,7 +623,7 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
         return plots
 
     color_map = {
-        "YOLO": "#7dd3fc",
+        "YOLO": "#FF6600",
         "CNN one-stage": "#34d399",
         "CNN two-stage": "#fbbf24",
     }
@@ -710,8 +712,8 @@ def render_model_overview() -> None:
     with c1:
         render_card(
             "1. YOLO actual",
-            "Arrancá con webcam: una pasada por frame para mostrar tiempo real.",
-            "blue",
+            "En deploy se mide con imagen demo/subida: una pasada por frame sin webcam remota.",
+            "orange",
         )
     with c2:
         render_card(
@@ -739,7 +741,7 @@ def render_theory_bridge() -> None:
         (
             "Idea YOLO",
             "Convertir detección en una regresión única: una pasada hacia adelante sobre la imagen completa.",
-            "blue",
+            "orange",
         ),
         (
             "Costo dominante",
@@ -899,7 +901,7 @@ def render_detection_summary(df: pd.DataFrame) -> None:
                     f"<strong>Principal:</strong> {row.get('top_detection', '—')}<br>"
                     f"<strong>Confianza media:</strong> {confidence_text}"
                 ),
-                "green" if row.get("family") == "CNN one-stage" else "blue" if row.get("family") == "YOLO" else "amber",
+                "green" if row.get("family") == "CNN one-stage" else "orange" if row.get("family") == "YOLO" else "amber",
             )
 
 

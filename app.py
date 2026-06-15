@@ -26,7 +26,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from yolo_complexity_lab.benchmark import BenchmarkConfig, benchmark_model, run_frame
+from yolo_complexity_lab.benchmark import BenchmarkConfig, DETECTION_ORANGE_BGR, benchmark_model, run_frame
 from yolo_complexity_lab.catalog import MODEL_CATALOG, catalog_rows
 from yolo_complexity_lab.exporting import write_results_csv
 from yolo_complexity_lab.loaders import load_model
@@ -119,6 +119,7 @@ def inject_css() -> None:
   --cyan: #0891b2;
   --green: #059669;
   --amber: #d97706;
+  --orange: #FF6600;
   --violet: #7c3aed;
   --shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
 }
@@ -289,6 +290,7 @@ p, li, span, label {
 .card-accent-blue { border-left: 4px solid var(--blue); }
 .card-accent-green { border-left: 4px solid var(--green); }
 .card-accent-amber { border-left: 4px solid var(--amber); }
+.card-accent-orange { border-left: 4px solid var(--orange); }
 .card-accent-violet { border-left: 4px solid var(--violet); }
 
 .small-label {
@@ -670,7 +672,29 @@ def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: f
                     
                     total_ms = (time.perf_counter() - start_total) * 1000
                     
-                    annotated_frame = results[0].plot()
+                    # Dibujar manualmente para mantener la misma convención visual
+                    # que el benchmark: OpenCV en BGR, Streamlit en RGB.
+                    annotated_frame = frame_resized.copy()
+                    try:
+                        boxes = getattr(results[0], "boxes", None)
+                        names = getattr(results[0], "names", {})
+                        if boxes is not None:
+                            for box in boxes:
+                                xyxy = box.xyxy.cpu().numpy().astype(int).flatten()
+                                if len(xyxy) < 4:
+                                    continue
+                                x1, y1, x2, y2 = xyxy[:4]
+                                class_id = int(box.cls.item()) if hasattr(box.cls, "item") else int(box.cls)
+                                conf = float(box.conf.item()) if hasattr(box.conf, "item") else float(box.conf)
+                                name = names.get(class_id, str(class_id)) if isinstance(names, dict) else str(class_id)
+                                label = f"{name} {conf:.2f}"
+                                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), DETECTION_ORANGE_BGR, 2)
+                                (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+                                label_top = max(0, y1 - text_h - 8)
+                                cv2.rectangle(annotated_frame, (x1, label_top), (x1 + text_w + 4, y1), DETECTION_ORANGE_BGR, -1)
+                                cv2.putText(annotated_frame, label, (x1 + 2, max(14, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
+                    except Exception:
+                        annotated_frame = results[0].plot()
                     annotated_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
                     detections_count = len(getattr(results[0], "boxes", []) or [])
                     
@@ -867,7 +891,7 @@ def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
         return plots
 
     color_map = {
-        "YOLO": "#7dd3fc",
+        "YOLO": "#FF6600",
         "CNN one-stage": "#34d399",
         "CNN two-stage": "#fbbf24",
     }
@@ -957,7 +981,7 @@ def render_model_overview() -> None:
         render_card(
             "1. YOLO actual",
             "Arrancá con webcam: una pasada por frame para mostrar tiempo real.",
-            "blue",
+            "orange",
         )
     with c2:
         render_card(
@@ -985,7 +1009,7 @@ def render_theory_bridge() -> None:
         (
             "Idea YOLO",
             "Convertir detección en una regresión única: una pasada hacia adelante sobre la imagen completa.",
-            "blue",
+            "orange",
         ),
         (
             "Costo dominante",
@@ -1146,7 +1170,7 @@ def render_detection_summary(df: pd.DataFrame) -> None:
                     f"<strong>Principal:</strong> {row.get('top_detection', '—')}<br>"
                     f"<strong>Confianza media:</strong> {confidence_text}"
                 ),
-                "green" if row.get("family") == "CNN one-stage" else "blue" if row.get("family") == "YOLO" else "amber",
+                "green" if row.get("family") == "CNN one-stage" else "orange" if row.get("family") == "YOLO" else "amber",
             )
 
 
