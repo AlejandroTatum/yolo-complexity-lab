@@ -1174,6 +1174,105 @@ def render_detection_summary(df: pd.DataFrame) -> None:
             )
 
 
+def _display_value(row: pd.Series, key: str, suffix: str = "", decimals: int = 3) -> str:
+    value = row.get(key)
+    if value is None or pd.isna(value):
+        return "—"
+    if isinstance(value, float):
+        return f"{value:.{decimals}f}{suffix}"
+    return f"{value}{suffix}"
+
+
+def render_live_yolo_results(df: pd.DataFrame, csv_path: str | None = None, presentation_mode: bool = False) -> None:
+    """Render YOLO live results as a practical demo, not a model comparison."""
+    if df.empty:
+        return
+
+    if presentation_mode:
+        st.markdown(
+            "<style>[data-testid=\"stMetric\"] { padding: 1.8rem; }</style>",
+            unsafe_allow_html=True,
+        )
+
+    row = df.iloc[0]
+    st.markdown("<h3 class='section-title'>Resumen práctico de YOLO en vivo</h3>", unsafe_allow_html=True)
+    st.caption(
+        "Esta sección no compara modelos. Resume cómo respondió YOLO11n en la webcam local: "
+        "tiempo por frame, FPS, detecciones y costo aproximado del modelo."
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Latencia promedio", _display_value(row, "latency_mean_ms", " ms"))
+    c2.metric("FPS efectivo", _display_value(row, "fps_effective", " FPS"))
+    c3.metric("Frames procesados", _display_value(row, "frames_measured", decimals=0))
+    c4.metric("Detecciones promedio", _display_value(row, "detections_mean", decimals=1))
+
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("p95 de latencia", _display_value(row, "latency_p95_ms", " ms"))
+    c6.metric("Inferencia media", _display_value(row, "inference_mean_ms", " ms"))
+    c7.metric("GFLOPs aprox.", _display_value(row, "gflops_approx", " G", decimals=4))
+    c8.metric("Parámetros", _display_value(row, "parameters_millions", " M"))
+
+    fps = row.get("fps_effective")
+    latency = row.get("latency_mean_ms")
+    if pd.notna(fps) and pd.notna(latency):
+        if float(fps) >= 30:
+            interpretation = (
+                f"En esta corrida YOLO11n alcanzó {float(fps):.1f} FPS "
+                f"con {float(latency):.1f} ms por frame, suficiente para una demo fluida cercana o superior a 30 FPS."
+            )
+            accent = "green"
+        else:
+            interpretation = (
+                f"En esta corrida YOLO11n alcanzó {float(fps):.1f} FPS "
+                f"con {float(latency):.1f} ms por frame. Funciona, pero está por debajo del umbral práctico de 30 FPS."
+            )
+            accent = "amber"
+        render_card(
+            "Lectura para la exposición",
+            (
+                f"{interpretation}<br>"
+                "La idea práctica es mostrar la inferencia en una sola pasada sobre video; "
+                "la comparación formal se hace en la ruta CNN vs YOLO."
+            ),
+            accent,
+        )
+
+    technical_columns = [
+        "model",
+        "device",
+        "input_size_px",
+        "latency_mean_ms",
+        "latency_p95_ms",
+        "fps_effective",
+        "preprocess_mean_ms",
+        "inference_mean_ms",
+        "postprocess_mean_ms",
+        "detections_mean",
+        "gflops_approx",
+        "parameters_millions",
+        "model_size_mb",
+    ]
+    available = [col for col in technical_columns if col in df.columns]
+    with st.expander("Ver datos técnicos de la corrida"):
+        st.dataframe(df[available], width="stretch", hide_index=True)
+
+    if csv_path:
+        csv_name = Path(csv_path).name
+        st.success(f"CSV generado: {csv_name}")
+        st.caption(f"Ruta local: {csv_path}")
+
+    csv_bytes = df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Descargar resumen CSV",
+        csv_bytes,
+        file_name="yolo_en_vivo_resumen.csv",
+        mime="text/csv",
+        key="download_live_yolo_csv",
+        on_click="ignore",
+    )
+
+
 def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, presentation_mode: bool = False, is_streaming: bool = False) -> None:
     """Render persisted benchmark results and export actions.
 
@@ -1184,17 +1283,19 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, pres
     if df.empty:
         return
 
+    if is_streaming:
+        render_live_yolo_results(df, csv_path, presentation_mode)
+        return
+
     metric_cards(df, presentation_mode)
-    
-    # Solo mostrar detección y tabla comparativa si NO es streaming
-    if not is_streaming:
-        render_detection_summary(df)
 
-        st.markdown("<h3 class='section-title'>Resumen comparativo</h3>", unsafe_allow_html=True)
-        st.dataframe(compact_results_table(df), width="stretch", hide_index=True)
+    render_detection_summary(df)
 
-        with st.expander("Ver tabla técnica completa"):
-            st.dataframe(df, width="stretch", hide_index=True)
+    st.markdown("<h3 class='section-title'>Resumen comparativo</h3>", unsafe_allow_html=True)
+    st.dataframe(compact_results_table(df), width="stretch", hide_index=True)
+
+    with st.expander("Ver tabla técnica completa"):
+        st.dataframe(df, width="stretch", hide_index=True)
 
     st.markdown("<h3 class='section-title'>Gráficos</h3>", unsafe_allow_html=True)
     plots = plot_results(df)
@@ -1217,23 +1318,19 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, pres
     # Exportación HTML removida a pedido del usuario
 
     # --- Vista de detecciones: mostrar el último frame anotado por cada modelo ---
-    # Solo mostrar si NO es streaming
-    if not is_streaming:
-        st.markdown("<h3 class='section-title'>Detección visual (último frame medido)</h3>", unsafe_allow_html=True)
-        st.caption("Estas imágenes muestran qué objetos detectó cada modelo en el último frame medido. Sirve para analizar reconocimiento visual, falsos positivos y falsos negativos; no reemplaza mAP.")
-        annotated_frames = st.session_state.get("annotated_frames", {})
-        if annotated_frames:
-            for model_key, frame_bgr in annotated_frames.items():
-                if frame_bgr is not None:
-                    try:
-                        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-                        spec = MODEL_CATALOG.get(model_key)
-                        model_name = spec.display_name if spec else model_key
-                        st.image(frame_rgb, caption=f"{model_name}", channels="RGB", width="stretch")
-                    except Exception:
-                        pass
-    else:
-        st.info("No hay imágenes anotadas disponibles. Ejecuta el benchmark con modelos YOLO para generarlas.")
+    st.markdown("<h3 class='section-title'>Detección visual (último frame medido)</h3>", unsafe_allow_html=True)
+    st.caption("Estas imágenes muestran qué objetos detectó cada modelo en el último frame medido. Sirve para analizar reconocimiento visual, falsos positivos y falsos negativos; no reemplaza mAP.")
+    annotated_frames = st.session_state.get("annotated_frames", {})
+    if annotated_frames:
+        for model_key, frame_bgr in annotated_frames.items():
+            if frame_bgr is not None:
+                try:
+                    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                    spec = MODEL_CATALOG.get(model_key)
+                    model_name = spec.display_name if spec else model_key
+                    st.image(frame_rgb, caption=f"{model_name}", channels="RGB", width="stretch")
+                except Exception:
+                    pass
 
 
 def render_controls_guide() -> None:
@@ -1588,7 +1685,7 @@ with benchmark_tab:
             else:
                 st.warning("No se pudo medir ningún modelo. Revisa dependencias, conexión o disponibilidad de pesos.")
     elif "pending_streaming_results" in st.session_state:
-        st.success("Streaming finalizado. Generando gráficas del rendimiento en vivo...")
+        st.success("Streaming finalizado. Mostrando resumen práctico de YOLO en vivo...")
         
         # Recuperar los datos guardados en el finally
         res = st.session_state.pop("pending_streaming_results")
