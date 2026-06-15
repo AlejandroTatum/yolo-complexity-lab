@@ -994,7 +994,11 @@ inject_css()
 dependency_warning()
 render_hero(True)
 
-with st.sidebar:
+# Layout de columnas fijas (sidebar no colapsable)
+# Ratio ajustado para que el sidebar sea angosto y el contenido tenga espacio
+sidebar_col, main_col = st.columns([0.22, 1], gap="medium")
+
+with sidebar_col:
     st.markdown("### Configuración del benchmark")
     
     # Detectar cambio de ruta para limpiar resultados viejos
@@ -1077,102 +1081,103 @@ with st.sidebar:
 
         pass
 
-inicio_tab, benchmark_tab = st.tabs(
-    ["Inicio", "Benchmark"]
-)
+with main_col:
+    inicio_tab, benchmark_tab = st.tabs(
+        ["Inicio", "Benchmark"]
+    )
 
-with inicio_tab:
-    st.markdown("<h2 class='section-title'>Ruta de comparación</h2>", unsafe_allow_html=True)
-    render_model_overview()
-    st.markdown("<h2 class='section-title'>Uso rápido</h2>", unsafe_allow_html=True)
-    render_explanation_flow()
-    st.write("")
-    with st.expander("Ver glosario de métricas"):
-        render_metric_glossary()
+    with inicio_tab:
+        st.markdown("<h2 class='section-title'>Ruta de comparación</h2>", unsafe_allow_html=True)
+        render_model_overview()
+        st.markdown("<h2 class='section-title'>Uso rápido</h2>", unsafe_allow_html=True)
+        render_explanation_flow()
+        st.write("")
+        with st.expander("Ver glosario de métricas"):
+            render_metric_glossary()
 
-with benchmark_tab:
-    title = "Benchmark de tiempo y complejidad"
-    st.markdown(f"<h2 class='section-title'>{title}</h2>", unsafe_allow_html=True)
-    st.caption("¿Cuánto tarda por frame y cómo crece el costo cuando aumenta n = H×W?")
-    
-    total_needed = int(warmup_frames + measure_frames)
-    frames_to_load = 1
-    frames, preview = source_frames(source_kind, frames_to_load, imgsz)
-
-    preview_col = st.columns(1)[0]
-    with preview_col:
-        if preview is not None:
-            render_preview_image(preview, "Vista previa del input")
-    
-    st.write("")
-    
-    # Botón de ejecución debajo de la imagen
-    run = st.button("Ejecutar comparación", type="primary")
-    
-    if run:
-        # Recargar frames para el benchmark completo
-        frames_to_load = total_needed
+    with benchmark_tab:
+        title = "Benchmark de tiempo y complejidad"
+        st.markdown(f"<h2 class='section-title'>{title}</h2>", unsafe_allow_html=True)
+        st.caption("¿Cuánto tarda por frame y cómo crece el costo cuando aumenta n = H×W?")
+        
+        total_needed = int(warmup_frames + measure_frames)
+        frames_to_load = 1
         frames, preview = source_frames(source_kind, frames_to_load, imgsz)
 
-    if run:
-        if not selected_models:
-            st.error("Selecciona al menos un modelo para iniciar el benchmark.")
-            st.stop()
+        preview_col = st.columns(1)[0]
+        with preview_col:
+            if preview is not None:
+                render_preview_image(preview, "Vista previa del input")
         
-        # Modo benchmark estándar
-        else:
-            if not frames:
-                st.error("No hay frames disponibles para medir. Revisa la fuente seleccionada.")
+        st.write("")
+        
+        # Botón de ejecución debajo de la imagen
+        run = st.button("Ejecutar comparación", type="primary")
+        
+        if run:
+            # Recargar frames para el benchmark completo
+            frames_to_load = total_needed
+            frames, preview = source_frames(source_kind, frames_to_load, imgsz)
+
+        if run:
+            if not selected_models:
+                st.error("Selecciona al menos un modelo para iniciar el benchmark.")
                 st.stop()
-
-            config = BenchmarkConfig(
-                imgsz=int(imgsz),
-                warmup_frames=int(warmup_frames),
-                measure_frames=int(measure_frames),
-                confidence=float(confidence),
-                iou=float(iou),
-            )
-            rows = []
-            progress = st.progress(0)
-            status = st.empty()
-            st.session_state["annotated_frames"] = {}
-
-            for index, model_key in enumerate(selected_models, start=1):
-                spec = MODEL_CATALOG[model_key]
-                status.markdown(f"## Cargando: Modelo {index} de {len(selected_models)}")
-                try:
-                    loaded = cached_load_model(model_key, device)
-                    row = benchmark_model(loaded, frames, config, include_complexity=include_complexity)
-                    # Guardar frame anotado aparte (no va al DataFrame)
-                    annotated_frame = row.pop("last_annotated_frame", None)
-                    if annotated_frame is not None:
-                        if "annotated_frames" not in st.session_state:
-                            st.session_state["annotated_frames"] = {}
-                        st.session_state["annotated_frames"][model_key] = annotated_frame
-                    rows.append(row)
-                except Exception as exc:
-                    st.error(f"Falló {spec.display_name}: {exc}")
-                progress.progress(index / len(selected_models))
-
-            status.empty()
-            progress.empty()
-
-            if rows:
-                df = pd.DataFrame(rows)
-                export_path = write_results_csv(df)
-                st.session_state["last_benchmark_df"] = df
-                st.session_state["last_benchmark_csv_path"] = str(export_path)
-                st.session_state.pop("last_html_zip", None)
-                st.session_state.pop("last_html_paths", None)
-                render_benchmark_results(df, str(export_path), True)
+            
+            # Modo benchmark estándar
             else:
-                st.warning("No se pudo medir ningún modelo. Revisa dependencias, conexión o disponibilidad de pesos.")
-    elif "last_benchmark_df" in st.session_state:
-        st.info("Mostrando el último benchmark ejecutado. Podés descargar CSV sin volver a medir.")
-        render_benchmark_results(
-            st.session_state["last_benchmark_df"],
-            st.session_state.get("last_benchmark_csv_path"),
-            True,
-        )
-    else:
-        st.info("Ejecutá la comparación para generar tabla, gráficos y CSV.")
+                if not frames:
+                    st.error("No hay frames disponibles para medir. Revisa la fuente seleccionada.")
+                    st.stop()
+
+                config = BenchmarkConfig(
+                    imgsz=int(imgsz),
+                    warmup_frames=int(warmup_frames),
+                    measure_frames=int(measure_frames),
+                    confidence=float(confidence),
+                    iou=float(iou),
+                )
+                rows = []
+                progress = st.progress(0)
+                status = st.empty()
+                st.session_state["annotated_frames"] = {}
+
+                for index, model_key in enumerate(selected_models, start=1):
+                    spec = MODEL_CATALOG[model_key]
+                    status.markdown(f"## Cargando: Modelo {index} de {len(selected_models)}")
+                    try:
+                        loaded = cached_load_model(model_key, device)
+                        row = benchmark_model(loaded, frames, config, include_complexity=include_complexity)
+                        # Guardar frame anotado aparte (no va al DataFrame)
+                        annotated_frame = row.pop("last_annotated_frame", None)
+                        if annotated_frame is not None:
+                            if "annotated_frames" not in st.session_state:
+                                st.session_state["annotated_frames"] = {}
+                            st.session_state["annotated_frames"][model_key] = annotated_frame
+                        rows.append(row)
+                    except Exception as exc:
+                        st.error(f"Falló {spec.display_name}: {exc}")
+                    progress.progress(index / len(selected_models))
+
+                status.empty()
+                progress.empty()
+
+                if rows:
+                    df = pd.DataFrame(rows)
+                    export_path = write_results_csv(df)
+                    st.session_state["last_benchmark_df"] = df
+                    st.session_state["last_benchmark_csv_path"] = str(export_path)
+                    st.session_state.pop("last_html_zip", None)
+                    st.session_state.pop("last_html_paths", None)
+                    render_benchmark_results(df, str(export_path), True)
+                else:
+                    st.warning("No se pudo medir ningún modelo. Revisa dependencias, conexión o disponibilidad de pesos.")
+        elif "last_benchmark_df" in st.session_state:
+            st.info("Mostrando el último benchmark ejecutado. Podés descargar CSV sin volver a medir.")
+            render_benchmark_results(
+                st.session_state["last_benchmark_df"],
+                st.session_state.get("last_benchmark_csv_path"),
+                True,
+            )
+        else:
+            st.info("Ejecutá la comparación para generar tabla, gráficos y CSV.")
