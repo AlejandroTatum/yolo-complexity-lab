@@ -7,7 +7,7 @@
 ## Requisitos para el deploy
 
 1. **Repo público en GitHub** (ya está en `https://github.com/AlejandroTatum/yolo-complexity-lab`)
-2. **Archivo principal**: `app.py` (ya está en la raíz)
+2. **Archivo principal**: `app_deploy.py` (versión sin webcam para Streamlit Cloud)
 3. **Dependencias**: `requirements.txt` (ya está en la raíz)
 4. **Configuración**: `.streamlit/config.toml` (ya está configurado)
 
@@ -18,7 +18,7 @@
 3. Click en **"New app"**
 4. Seleccionar el repo: `AlejandroTatum/yolo-complexity-lab`
 5. Seleccionar rama: `main`
-6. Archivo principal: `app.py` (debe detectarlo automáticamente)
+6. Archivo principal: `app_deploy.py`
 7. Click en **Deploy**
 
 ## Notas importantes

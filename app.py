@@ -1220,7 +1220,7 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, pres
     # Solo mostrar si NO es streaming
     if not is_streaming:
         st.markdown("<h3 class='section-title'>Detección visual (último frame medido)</h3>", unsafe_allow_html=True)
-        st.caption("Estas imágenes muestran qué objetos detectó cada modelo en el último frame medido. Sirve para analizar precisión y falsos positivos.")
+        st.caption("Estas imágenes muestran qué objetos detectó cada modelo en el último frame medido. Sirve para analizar reconocimiento visual, falsos positivos y falsos negativos; no reemplaza mAP.")
         annotated_frames = st.session_state.get("annotated_frames", {})
         if annotated_frames:
             for model_key, frame_bgr in annotated_frames.items():
@@ -1312,7 +1312,7 @@ with st.sidebar:
     comparison_route = st.radio(
         "Ruta de comparación",
         options=list(PRESET_MODELS.keys()),
-        help="Comparar detectores por tiempo y precisión." if IS_CLOUD else "Primero mostrás YOLO en vivo; después comparás contra modelos CNN para probar la teoría.",
+        help="Comparar detectores por tiempo, costo y resultado visual." if IS_CLOUD else "Primero mostrás YOLO en vivo; después comparás contra modelos CNN para probar la teoría.",
     )
     
     # Si cambió la ruta, limpiar resultados previos

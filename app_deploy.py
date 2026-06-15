@@ -70,17 +70,6 @@ METRIC_EXPLANATIONS = {
 }
 
 
-def get_default_device() -> str:
-    """Detecta si hay GPU disponible y retorna el dispositivo apropiado."""
-    try:
-        import torch
-        if torch.cuda.is_available():
-            return "cuda:0"
-    except Exception:
-        pass
-    return "auto"
-
-
 @st.cache_resource(show_spinner=False)
 def cached_load_model(spec_key: str, device: str):
     return load_model(spec_key, device)
@@ -943,7 +932,7 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, pres
 
     # --- Vista de detecciones: mostrar el último frame anotado por cada modelo ---
     st.markdown("<h3 class='section-title'>Detección visual (último frame medido)</h3>", unsafe_allow_html=True)
-    st.caption("Estas imágenes muestran qué objetos detectó cada modelo en el último frame medido. Sirve para analizar precisión y falsos positivos.")
+    st.caption("Estas imágenes muestran qué objetos detectó cada modelo en el último frame medido. Sirve para analizar reconocimiento visual, falsos positivos y falsos negativos; no reemplaza mAP.")
     annotated_frames = st.session_state.get("annotated_frames", {})
     if annotated_frames:
         for model_key, frame_bgr in annotated_frames.items():
@@ -969,10 +958,10 @@ def render_controls_guide() -> None:
         ("Ruta de comparación", "Elige la historia del experimento: antiguo → YOLO, escalado YOLO, demo gestos o selección manual."),
         ("Modelos a comparar", "En modo personalizado elige detectores manualmente. Para clase, compara al menos un baseline antiguo con YOLO."),
         ("Fuente de frames", "Define de dónde salen las imágenes. La demo persona/perro/fruta sirve para reconocimiento; la sintética solo para tiempo."),
-        ("Dispositivo", "Permite medir en CPU o GPU. Sirve para separar el diseño del modelo del hardware usado."),
+        ("Dónde se ejecuta", "En deploy se mide en CPU del servidor de Streamlit Cloud. La GPU local del navegador no participa."),
         ("Perfil de prueba", "Configura valores iniciales. 'Rápida' valida que todo funcione; 'Presentación' es equilibrada; 'Completa' mide con más estabilidad."),
         ("Resolución", "Aumenta o reduce el tamaño de entrada. Sirve para ver cómo crece n = H × W en la complejidad."),
-        ("Frames de calentamiento", "Se ejecutan antes de medir. Sirven para estabilizar caché, GPU y carga inicial."),
+        ("Frames de calentamiento", "Se ejecutan antes de medir. Sirven para estabilizar carga inicial, cachés y descarga/carga del modelo."),
         ("Frames medidos", "Son los frames que sí entran en latencia y FPS. Más frames dan una medición más estable."),
         ("Confianza mínima", "Filtra detecciones débiles. Sirve para reducir falsas detecciones y puede bajar cajas candidatas."),
         ("IoU para NMS", "Controla cuándo dos cajas se consideran solapadas. Sirve para regular el postprocesamiento O(B²)."),
@@ -1005,7 +994,7 @@ with sidebar_col:
     comparison_route = st.radio(
         "Ruta de comparación",
         options=list(PRESET_MODELS.keys()),
-        help="Comparar detectores por tiempo y precisión.",
+        help="Comparar detectores por tiempo, costo y resultado visual.",
     )
     
     # Si cambió la ruta, limpiar resultados previos
@@ -1051,7 +1040,7 @@ with sidebar_col:
             min_value=0,
             max_value=30,
             value=3,
-            help="No se reportan. Sirven para estabilizar carga de modelo, cachés y GPU.",
+            help="No se reportan. Sirven para estabilizar carga inicial, cachés y descarga/carga del modelo.",
         )
         measure_frames = st.number_input(
             "Frames medidos",
