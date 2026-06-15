@@ -378,9 +378,28 @@ hr {
   background: transparent;
 }
 
-/* Sidebar: se maneja nativamente por Streamlit */
-/* initial_sidebar_state="expanded" en st.set_page_config() mantiene abierto por defecto */
-/* No forzar con CSS para evitar problemas en mobile */
+/* SIDEBAR: Desktop fijo, Mobile colapsable */
+/* Desktop: sidebar fijo expandido, botón oculto */
+@media (min-width: 768px) {
+  button[data-testid="stSidebarNav"] {
+    display: none !important;
+  }
+  
+  [data-testid="stSidebar"] {
+    transform: none !important;
+    transition: none !important;
+    margin-left: 0 !important;
+  }
+}
+
+/* Mobile: asegurar que botón hamburguesa sea visible */
+@media (max-width: 767px) {
+  button[data-testid="stSidebarNav"] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+}
 
 .preview-frame {
   border: 1px solid var(--line);
