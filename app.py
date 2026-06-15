@@ -1213,30 +1213,6 @@ def render_live_yolo_results(df: pd.DataFrame, csv_path: str | None = None, pres
     c7.metric("GFLOPs aprox.", _display_value(row, "gflops_approx", " G", decimals=4))
     c8.metric("Parámetros", _display_value(row, "parameters_millions", " M"))
 
-    fps = row.get("fps_effective")
-    latency = row.get("latency_mean_ms")
-    if pd.notna(fps) and pd.notna(latency):
-        if float(fps) >= 30:
-            interpretation = (
-                f"En esta corrida YOLO11n alcanzó {float(fps):.1f} FPS "
-                f"con {float(latency):.1f} ms por frame, suficiente para una demo fluida cercana o superior a 30 FPS."
-            )
-            accent = "green"
-        else:
-            interpretation = (
-                f"En esta corrida YOLO11n alcanzó {float(fps):.1f} FPS "
-                f"con {float(latency):.1f} ms por frame. Funciona, pero está por debajo del umbral práctico de 30 FPS."
-            )
-            accent = "amber"
-        render_card(
-            "Lectura para la exposición",
-            (
-                f"{interpretation}<br>"
-                "La idea práctica es mostrar la inferencia en una sola pasada sobre video; "
-                "la comparación formal se hace en la ruta CNN vs YOLO."
-            ),
-            accent,
-        )
 
     technical_columns = [
         "model",
