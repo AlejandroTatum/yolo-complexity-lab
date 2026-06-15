@@ -59,11 +59,7 @@ PRESET_HELP = {
     "Comparación CNN vs YOLO": "Comparar dos etapas, one-stage CNN y YOLO para probar tiempo y complejidad.",
 }
 
-DEVICE_HELP = {
-    "auto": "Usa GPU si PyTorch detecta CUDA; si no, usa CPU.",
-    "cpu": "Fuerza ejecución en procesador. Más comparable entre máquinas, pero más lento.",
-    "cuda:0": "Fuerza la primera GPU NVIDIA disponible. Si no existe, el loader cae a CPU.",
-}
+DEPLOY_DEVICE = "cpu"
 
 METRIC_EXPLANATIONS = {
     "Latencia": "Tiempo que tarda el modelo en procesar un frame. Menor es mejor.",
@@ -1037,7 +1033,12 @@ with sidebar_col:
     )
 
     with st.expander("Configuración avanzada"):
-        device = st.selectbox("Dispositivo de ejecución", list(DEVICE_HELP.keys()), help="Controla si se usa CPU o GPU.")
+        device = DEPLOY_DEVICE
+        st.markdown("**Dónde se ejecuta:** CPU del servidor de Streamlit Cloud")
+        st.caption(
+            "En deploy no se ofrece CUDA ni GPU local: la app corre en un servidor remoto, "
+            "no en la máquina del navegador."
+        )
 
         imgsz = st.select_slider(
             "Resolución cuadrada",
