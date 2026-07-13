@@ -1,6 +1,6 @@
 # YOLO Complexity Lab
 
-App local en Streamlit para explicar **YOLO en tiempo real** y comparar **tiempo de ejecución** + **complejidad computacional** frente a detectores CNN clásicos.
+Laboratorio académico local en Streamlit para explicar **YOLO en tiempo real** y comparar **tiempo de ejecución** y **complejidad computacional** frente a detectores CNN clásicos.
 
 ## Enfoque
 
@@ -55,7 +55,8 @@ No subas `.venv/`, pesos `.pt`, videos pesados ni resultados generados. Los peso
 > Nota: no instales con `pip` del sistema. Este proyecto ya usa `.venv` para evitar el error `externally-managed-environment`.
 
 ```bash
-cd /home/alejandro/OpenCode/.projects/apps/yolo-complexity-lab
+git clone https://github.com/AlejandroTatum/yolo-complexity-lab.git
+cd yolo-complexity-lab
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -67,15 +68,8 @@ En este equipo se validó con `python3.14` dentro de `.venv` y `torch 2.12.0+cu1
 ## Ejecutar
 
 ```bash
-cd /home/alejandro/OpenCode/.projects/apps/yolo-complexity-lab
 source .venv/bin/activate
 streamlit run app.py
-```
-
-También podés correr desde el entregable visible:
-
-```bash
-/home/alejandro/OpenCode/outputs/university/complejidad-computacional/PROYECTO001_YOLO_COMPLEXITY_LAB_Alejandro_Padilla/run_app.sh
 ```
 
 ## Big-O usado
@@ -117,9 +111,12 @@ outputs/university/complejidad-computacional/PROYECTO001_YOLO_COMPLEXITY_LAB_Ale
 ## Validación rápida sin dependencias pesadas
 
 ```bash
-cd /home/alejandro/OpenCode/.projects/apps/yolo-complexity-lab
 python3 scripts/smoke_check.py
 ```
+
+## Estado del proyecto
+
+Proyecto académico preparado para demostraciones locales. Las métricas dependen del hardware y del entorno de ejecución; no representan una evaluación formal de precisión entre modelos.
 
 ## Assets de demo
 
