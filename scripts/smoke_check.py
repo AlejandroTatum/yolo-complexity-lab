@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from http.client import HTTPConnection, HTTPException
 import re
 import socket
 import subprocess
@@ -9,8 +10,6 @@ import threading
 import time
 import tomllib
 from pathlib import Path
-from urllib.error import HTTPError, URLError
-from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -23,6 +22,9 @@ from yolo_complexity_lab.system_info import system_info_dict
 
 STARTUP_TIMEOUT_SECONDS = 90.0
 POLL_INTERVAL_SECONDS = 0.25
+_LOOPBACK_HOST = "127.0.0.1"
+_HEALTH_PATH = "/healthz"
+_PRIMARY_PATH = "/"
 _LOG_ERROR = re.compile(r"\b(?:traceback|exception|error)\b", re.IGNORECASE)
 
 
@@ -33,6 +35,22 @@ class SmokeCheckError(RuntimeError):
 def _require(condition: bool, message: str) -> None:
     if not condition:
         raise SmokeCheckError(message)
+
+
+def _parse_port(value: str) -> int:
+    try:
+        port = int(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("port must be an integer between 1 and 65535") from exc
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError("port must be an integer between 1 and 65535")
+    return port
+
+
+def _validate_port(port: object) -> int:
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise SmokeCheckError("Port must be an integer between 1 and 65535.")
+    return port
 
 
 def check_static(root: Path = ROOT) -> dict[str, object]:
@@ -70,6 +88,7 @@ def check_static(root: Path = ROOT) -> dict[str, object]:
 
 
 def _start_server(root: Path, port: int) -> subprocess.Popen[str]:
+    port = _validate_port(port)
     try:
         return subprocess.Popen(
             [
@@ -83,6 +102,7 @@ def _start_server(root: Path, port: int) -> subprocess.Popen[str]:
                 "--server.port",
                 str(port),
             ],
+            shell=False,
             cwd=root,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -93,10 +113,11 @@ def _start_server(root: Path, port: int) -> subprocess.Popen[str]:
         raise SmokeCheckError(f"Could not start Streamlit child process: {exc}") from exc
 
 
-def _require_port_available(host: str, port: int) -> None:
+def _require_port_available(port: int) -> None:
+    port = _validate_port(port)
     try:
-        with socket.create_connection((host, port), timeout=0.2):
-            raise SmokeCheckError(f"Port {port} on {host} is already in use; choose an available port.")
+        with socket.create_connection((_LOOPBACK_HOST, port), timeout=0.2):
+            raise SmokeCheckError(f"Port {port} on {_LOOPBACK_HOST} is already in use; choose an available port.")
     except SmokeCheckError:
         raise
     except OSError:
@@ -110,43 +131,67 @@ def _read_output(process: subprocess.Popen[str], logs: list[str]) -> None:
         logs.append(line.rstrip())
 
 
-def _probe(url: str) -> int | None:
-    try:
-        with urlopen(url, timeout=2) as response:
-            return response.status
-    except HTTPError as exc:
-        return exc.code
-    except TimeoutError:
-        return None
-    except URLError:
-        return None
+class _LoopbackProbe:
+    def __init__(self, port: int) -> None:
+        self._port = _validate_port(port)
+
+    def get(self, path: str) -> int | None:
+        if path not in {_HEALTH_PATH, _PRIMARY_PATH}:
+            raise SmokeCheckError(f"Unsupported loopback probe path: {path}")
+        port = _validate_port(self._port)
+        connection: HTTPConnection | None = None
+        try:
+            connection = HTTPConnection(_LOOPBACK_HOST, port, timeout=2)
+            connection.request("GET", path)
+            return connection.getresponse().status
+        except TimeoutError:
+            return None
+        except (HTTPException, OSError):
+            return None
+        finally:
+            if connection is not None:
+                connection.close()
 
 
 def _log_errors(logs: list[str]) -> list[str]:
     return [line for line in logs if _LOG_ERROR.search(line)]
 
 
-def _wait_for_server(process: subprocess.Popen[str], base_url: str, timeout: float, logs: list[str]) -> None:
+def _raise_on_log_errors(logs: list[str], phase: str) -> None:
+    failures = _log_errors(logs)
+    if failures:
+        raise SmokeCheckError(f"Streamlit emitted {phase} errors: " + " | ".join(failures[-3:]))
+
+
+def _raise_if_process_exited(process: subprocess.Popen[str]) -> None:
+    return_code = process.poll()
+    if return_code is not None:
+        raise SmokeCheckError(f"Streamlit exited before becoming ready (code {return_code}). Check its logs.")
+
+
+def _probes_show_ready(probe: _LoopbackProbe, logs: list[str]) -> bool:
+    health = probe.get(_HEALTH_PATH)
+    if health != 200:
+        if health is not None:
+            raise SmokeCheckError(f"Health probe failed with HTTP {health}; expected HTTP 200.")
+        return False
+
+    page = probe.get(_PRIMARY_PATH)
+    if page != 200:
+        if page is not None:
+            raise SmokeCheckError(f"Primary page probe failed with HTTP {page}; expected HTTP 200.")
+        return False
+    _raise_on_log_errors(logs, "runtime")
+    return True
+
+
+def _wait_for_server(process: subprocess.Popen[str], probe: _LoopbackProbe, timeout: float, logs: list[str]) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        failures = _log_errors(logs)
-        if failures:
-            raise SmokeCheckError("Streamlit emitted startup errors: " + " | ".join(failures[-3:]))
-        return_code = process.poll()
-        if return_code is not None:
-            raise SmokeCheckError(f"Streamlit exited before becoming ready (code {return_code}). Check its logs.")
-        health = _probe(f"{base_url}/healthz")
-        if health == 200:
-            page = _probe(f"{base_url}/")
-            if page == 200:
-                failures = _log_errors(logs)
-                if failures:
-                    raise SmokeCheckError("Streamlit emitted runtime errors: " + " | ".join(failures[-3:]))
-                return
-            if page is not None:
-                raise SmokeCheckError(f"Primary page probe failed with HTTP {page}; expected HTTP 200.")
-        elif health is not None:
-            raise SmokeCheckError(f"Health probe failed with HTTP {health}; expected HTTP 200.")
+        _raise_on_log_errors(logs, "startup")
+        _raise_if_process_exited(process)
+        if _probes_show_ready(probe, logs):
+            return
         time.sleep(POLL_INTERVAL_SECONDS)
     raise SmokeCheckError(f"Streamlit did not become ready within {timeout:g} seconds.")
 
@@ -163,16 +208,17 @@ def _terminate_process(process: subprocess.Popen[str]) -> None:
 
 def check_server(root: Path = ROOT, port: int = 8901) -> None:
     """Start, probe, and always terminate an isolated Streamlit child."""
-    host = "127.0.0.1"
-    _require_port_available(host, port)
+    port = _validate_port(port)
+    _require_port_available(port)
     process = _start_server(root, port)
+    probe = _LoopbackProbe(port)
     logs: list[str] = []
     reader = threading.Thread(target=_read_output, args=(process, logs), daemon=True)
     reader.start()
     succeeded = False
     try:
         reader.join(timeout=0.01)
-        _wait_for_server(process, f"http://{host}:{port}", STARTUP_TIMEOUT_SECONDS, logs)
+        _wait_for_server(process, probe, STARTUP_TIMEOUT_SECONDS, logs)
         succeeded = True
     finally:
         _terminate_process(process)
@@ -188,7 +234,7 @@ def check_server(root: Path = ROOT, port: int = 8901) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate static deployment requirements and Streamlit reachability.")
     parser.add_argument("--server", action="store_true", help="Start Streamlit and probe /healthz and /.")
-    parser.add_argument("--port", type=int, default=8901, help="Port used by --server (default: 8901).")
+    parser.add_argument("--port", type=_parse_port, default=8901, help="Port used by --server (default: 8901).")
     args = parser.parse_args(argv)
     try:
         result = check_static()
