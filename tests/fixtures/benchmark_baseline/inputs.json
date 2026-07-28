@@ -1,0 +1,20 @@
+{
+  "model": {
+    "key": "fixture-yolo",
+    "display_name": "Fixture YOLO",
+    "family": "YOLO",
+    "backend": "ultralytics",
+    "device": "cpu",
+    "parameter_count": 1000000,
+    "model_size_mb": 4.0,
+    "size_note": "Frozen fixture model"
+  },
+  "config": {
+    "imgsz": 320,
+    "warmup_frames": 1,
+    "measure_frames": 2,
+    "confidence": 0.25,
+    "iou": 0.45
+  },
+  "frames": [1, 2, 3]
+}
