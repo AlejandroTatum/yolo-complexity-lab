@@ -14,3 +14,6 @@ annotations/
 
 # The PR1 benchmark contract is intentionally versioned even though runtime CSVs are not.
 !tests/fixtures/benchmark_baseline/*.csv
+
+# CodeGraph local index
+.codegraph/
