@@ -1,21 +1,12 @@
 from __future__ import annotations
 
 import base64
-import cv2
 import os
 import sys
 from pathlib import Path
 
+import cv2
 
-def is_streamlit_cloud() -> bool:
-    """Detectar si la app corre en Streamlit Cloud (no local)."""
-    server_url = os.environ.get("STREAMLIT_SERVER_URL", "")
-    return bool(server_url) and "localhost" not in server_url
-
-
-# Si estamos en Streamlit Cloud, bloquear opciones que no funcionan
-# (webcam no tiene sentido en un servidor remoto)
-IS_CLOUD = is_streamlit_cloud()
 
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
@@ -28,6 +19,7 @@ import streamlit as st
 
 from yolo_complexity_lab.benchmark import BenchmarkConfig, DETECTION_ORANGE_BGR, benchmark_model, run_frame
 from yolo_complexity_lab.catalog import MODEL_CATALOG, catalog_rows
+from yolo_complexity_lab.environment import detect_capabilities
 from yolo_complexity_lab.exporting import write_results_csv
 from yolo_complexity_lab.loaders import load_model
 from yolo_complexity_lab.paths import default_export_dir
@@ -39,6 +31,8 @@ from yolo_complexity_lab.sources import (
 )
 from yolo_complexity_lab.system_info import system_info_dict
 
+CAPABILITIES = detect_capabilities(ROOT, os.environ)
+
 st.set_page_config(
     page_title="YOLO Complexity Lab",
     page_icon=None,
@@ -46,14 +40,17 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Opciones de fuente: en cloud, solo funciona Demo e Imagen (no webcam)
 SOURCE_HELP_ALL = {
     "Demo persona/perro/fruta": "Usa una lámina local con una persona, un perro y una banana para comparar reconocimiento y falsos positivos.",
     "Subir imagen": "Repite una imagen propia varias veces para medir latencia sin depender de un video.",
     "Webcam OpenCV local": "Captura frames desde la cámara local. Útil para demo en vivo, pero depende de la cámara y luz.",
 }
 
-SOURCE_HELP = {k: v for k, v in SOURCE_HELP_ALL.items() if not IS_CLOUD or k != "Webcam OpenCV local"}
+SOURCE_HELP = {
+    key: value
+    for key, value in SOURCE_HELP_ALL.items()
+    if CAPABILITIES.webcam or key != "Webcam OpenCV local"
+}
 
 # Opciones de ruta: en cloud, no funciona YOLO en vivo (necesita webcam)
 PRESET_MODELS_ALL = {
@@ -63,6 +60,7 @@ PRESET_MODELS_ALL = {
         "ssdlite_mobilenet_v3",
         "yolo11n",
     ],
+    "Custom weights": ["yolov8_gestures"],
 }
 
 PRESET_HELP_ALL = {
@@ -70,14 +68,25 @@ PRESET_HELP_ALL = {
     "Comparación CNN vs YOLO": "Comparar dos etapas, one-stage CNN y YOLO para probar tiempo y complejidad.",
 }
 
-PRESET_MODELS = {k: v for k, v in PRESET_MODELS_ALL.items() if not IS_CLOUD or k != "YOLO actual en vivo"}
-PRESET_HELP = {k: v for k, v in PRESET_HELP_ALL.items() if not IS_CLOUD or k != "YOLO actual en vivo"}
+PRESET_HELP_ALL["Custom weights"] = "Run the optional root best.pt weights when they are available."
+PRESET_MODELS = {
+    key: value
+    for key, value in PRESET_MODELS_ALL.items()
+    if (CAPABILITIES.streaming or key != "YOLO actual en vivo")
+    and (CAPABILITIES.custom_weights or key != "Custom weights")
+}
+PRESET_HELP = {
+    key: value
+    for key, value in PRESET_HELP_ALL.items()
+    if key in PRESET_MODELS
+}
 
 DEVICE_HELP = {
     "auto": "Usa GPU si PyTorch detecta CUDA; si no, usa CPU.",
     "cpu": "Fuerza ejecución en procesador. Más comparable entre máquinas, pero más lento.",
     "cuda:0": "Fuerza la primera GPU NVIDIA disponible. Si no existe, el loader cae a CPU.",
 }
+DEVICE_OPTIONS = CAPABILITIES.device_options
 
 METRIC_EXPLANATIONS = {
     "Latencia": "Tiempo que tarda el modelo en procesar un frame. Menor es mejor.",
@@ -558,8 +567,23 @@ def source_frames(source_kind: str, total_needed: int, imgsz: int) -> tuple[list
             return repeat_frame(frame, total_needed), frame
 
     if source_kind == "Webcam OpenCV local":
+        if not CAPABILITIES.webcam:
+            st.error("Webcam capture is unavailable in this environment. Choose Demo or Image upload.")
+            return [], None
         camera_index = int(st.session_state.get("camera_index", 0))
-        frames = frames_from_webcam(camera_index, limit=total_needed)
+        try:
+            frames = frames_from_webcam(camera_index, limit=total_needed)
+        except Exception as exc:
+            st.error(
+                f"Unable to access webcam index {camera_index}: {exc}. "
+                "Check permissions, connect a camera, or choose another source."
+            )
+            return [], None
+        if not frames:
+            st.error(
+                f"Webcam index {camera_index} returned no frames. "
+                "Check permissions, connection, and camera availability."
+            )
         preview = frames[0] if frames else None
         return frames, preview
 
@@ -598,6 +622,10 @@ def render_preview_image(frame: object, caption: str = "Vista previa del input")
 
 def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: float, device: str, camera_index: int, measure_frames: int | None = None) -> dict[str, list]:
     """Ejecuta streaming en tiempo real desde webcam recopilando métricas de benchmarking."""
+    if not CAPABILITIES.streaming:
+        st.error("Live streaming is unavailable in this environment. Choose a supported image source.")
+        return {}
+
     import cv2
     import time
     import statistics
@@ -611,7 +639,11 @@ def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: f
     
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
-        st.error("No se pudo abrir la cámara.")
+        cap.release()
+        st.error(
+            f"Unable to open webcam index {camera_index}. "
+            "Check permissions, connection, and camera availability."
+        )
         return {}
     
     placeholder_video = st.empty()
@@ -1376,7 +1408,7 @@ render_hero(True)
 with st.sidebar:
     st.markdown("### Configuración del benchmark")
     
-    if IS_CLOUD:
+    if CAPABILITIES.is_cloud:
         st.info("🔒 **Modo deploy activo.** Webcam y streaming no disponibles en el navegador. Usa *Demo* o *Subir imagen*.", icon="ℹ️")
     
     # Detectar cambio de ruta para limpiar resultados viejos
@@ -1385,7 +1417,7 @@ with st.sidebar:
     comparison_route = st.radio(
         "Ruta de comparación",
         options=list(PRESET_MODELS.keys()),
-        help="Comparar detectores por tiempo, costo y resultado visual." if IS_CLOUD else "Primero mostrás YOLO en vivo; después comparás contra modelos CNN para probar la teoría.",
+        help="Comparar detectores por tiempo, costo y resultado visual." if CAPABILITIES.is_cloud else "Primero mostrás YOLO en vivo; después comparás contra modelos CNN para probar la teoría.",
     )
     
     # Si cambió la ruta, limpiar resultados previos
@@ -1404,7 +1436,7 @@ with st.sidebar:
         st.caption(f"{index}. {MODEL_CATALOG[key].display_name}")
 
     source_options = list(SOURCE_HELP.keys())
-    default_source = "Demo persona/perro/fruta" if IS_CLOUD else ("Webcam OpenCV local" if comparison_route == "YOLO actual en vivo" else "Demo persona/perro/fruta")
+    default_source = "Demo persona/perro/fruta" if CAPABILITIES.is_cloud else ("Webcam OpenCV local" if comparison_route == "YOLO actual en vivo" else "Demo persona/perro/fruta")
     source_kind = st.selectbox(
         "Fuente de frames",
         source_options,
@@ -1413,7 +1445,7 @@ with st.sidebar:
     )
 
     streaming_mode = False
-    if not IS_CLOUD and source_kind == "Webcam OpenCV local":
+    if CAPABILITIES.streaming and source_kind == "Webcam OpenCV local":
         streaming_mode = st.checkbox(
             "Modo streaming en vivo",
             value=comparison_route == "YOLO actual en vivo",
@@ -1421,10 +1453,16 @@ with st.sidebar:
         )
 
     with st.expander("Configuración avanzada"):
-        if not IS_CLOUD and source_kind == "Webcam OpenCV local":
+        if CAPABILITIES.webcam and source_kind == "Webcam OpenCV local":
             st.number_input("Índice de cámara", min_value=0, max_value=5, value=0, key="camera_index")
 
-        device = st.selectbox("Dispositivo de ejecución", list(DEVICE_HELP.keys()), help="Controla si se usa CPU o GPU.")
+        device = st.selectbox(
+            "Dispositivo de ejecución",
+            options=list(DEVICE_OPTIONS),
+            index=list(DEVICE_OPTIONS).index(CAPABILITIES.device_default),
+            format_func=lambda option: f"{option}: {DEVICE_HELP[option]}",
+            help="Controla si se usa CPU o GPU. Las opciones dependen del entorno.",
+        )
 
         imgsz = st.select_slider(
             "Resolución cuadrada",
@@ -1494,8 +1532,11 @@ with benchmark_tab:
     st.caption("¿Cuánto tarda por frame y cómo crece el costo cuando aumenta n = H×W?")
     
     total_needed = int(warmup_frames + measure_frames)
-    frames_to_load = 1
-    frames, preview = source_frames(source_kind, frames_to_load, imgsz)
+    frames, preview = (
+        ([], None)
+        if source_kind == "Webcam OpenCV local"
+        else source_frames(source_kind, 1, imgsz)
+    )
 
     preview_col = st.columns(1)[0]
     with preview_col:
@@ -1512,8 +1553,10 @@ with benchmark_tab:
         st.info("La webcam local se leerá recién cuando ejecutes el benchmark para evitar capturas innecesarias.")
     elif run:
         # Recargar frames para el benchmark completo
-        frames_to_load = total_needed
-        frames, preview = source_frames(source_kind, frames_to_load, imgsz)
+        if streaming_mode:
+            frames, preview = [], None
+        else:
+            frames, preview = source_frames(source_kind, total_needed, imgsz)
 
     if run:
         if not selected_models:
@@ -1615,7 +1658,10 @@ with benchmark_tab:
         # Modo benchmark estándar
         else:
             if not frames:
-                st.error("No hay frames disponibles para medir. Revisa la fuente seleccionada.")
+                st.error(
+                    "No frames are available for the selected source. "
+                    "Choose another source or verify the webcam and permissions."
+                )
                 st.stop()
 
             config = BenchmarkConfig(
