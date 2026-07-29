@@ -4,10 +4,12 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 import streamlit
 import numpy as np
+import pandas as pd
 
 from yolo_complexity_lab import environment as environment_module
 from yolo_complexity_lab.environment import detect_capabilities
@@ -83,14 +85,11 @@ def test_app_renders_environment_gated_routes_sources_and_devices(
     local_app, local_widgets = load_app(monkeypatch, local)
     cloud_app, cloud_widgets = load_app(monkeypatch, cloud)
 
-    assert set(local_app.PRESET_MODELS) == {"YOLO actual en vivo", "Comparación CNN vs YOLO", "Custom weights"}
-    assert set(cloud_app.PRESET_MODELS) == {"Comparación CNN vs YOLO"}
-    local_source = next(options for label, options in local_widgets if label == "Fuente de frames")
-    cloud_source = next(options for label, options in cloud_widgets if label == "Fuente de frames")
-    assert "Webcam OpenCV local" in local_source
-    assert "Webcam OpenCV local" not in cloud_source
-    assert next(options for label, options in local_widgets if label == "Dispositivo de ejecución") == ("auto", "cpu")
-    assert next(options for label, options in cloud_widgets if label == "Dispositivo de ejecución") == ("cpu",)
+    assert set(local_app.PRESET_MODELS) == {"Live YOLO", "CNN vs YOLO comparison", "Custom weights"} and set(cloud_app.PRESET_MODELS) == {"CNN vs YOLO comparison"}
+    local_source = next(options for label, options in local_widgets if label == "Frame source")
+    cloud_source = next(options for label, options in cloud_widgets if label == "Frame source")
+    assert "Local OpenCV webcam" in local_source and "Local OpenCV webcam" not in cloud_source
+    assert next(options for label, options in local_widgets if label == "Execution device") == ("auto", "cpu") and next(options for label, options in cloud_widgets if label == "Execution device") == ("cpu",)
 
 
 def test_failed_webcam_open_releases_capture(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -155,8 +154,20 @@ def test_cloud_benchmark_preserves_session_and_csv_flow(
 
     app_module, _ = load_app(monkeypatch, cloud, run=True)
 
-    assert [key for key, _, _ in calls] == app_module.PRESET_MODELS["Comparación CNN vs YOLO"]
+    assert [key for key, _, _ in calls] == app_module.PRESET_MODELS["CNN vs YOLO comparison"]
     assert all(frames for _, frames, _ in calls)
     assert all(config.measure_frames == 20 and config.warmup_frames == 3 for _, _, config in calls)
     assert app_module.st.session_state["last_benchmark_df"].shape[0] == len(calls)
     assert app_module.st.session_state["last_benchmark_csv_path"] == str(tmp_path / "results.csv")
+
+CLOUD = SimpleNamespace(is_cloud=True, webcam=False, streaming=False, custom_weights=False, device_options=("cpu",), device_default="cpu")
+
+def test_rendered_result_and_streaming_surfaces_use_english_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    app_module, _ = load_app(monkeypatch, CLOUD)
+    st = app_module.st = MagicMock(); st.__enter__.return_value = st; st.__exit__.return_value = False; st.columns.side_effect = lambda spec: [st] * (len(spec) if isinstance(spec, list) else spec); st.expander.return_value = st; st.session_state = {"annotated_frames": {}}
+    frame = {"model": "YOLO11n", "family": "YOLO", "latency_mean_ms": 10.0, "latency_p95_ms": 12.0, "fps_effective": 100.0, "gflops_approx": 1.0, "parameters_millions": 2.0, "recognized_classes": "person", "top_detection": "person", "avg_confidence": 0.9, "input_size_px": 32, "detections_mean": 1.0, "preprocess_mean_ms": 1.0, "inference_mean_ms": 2.0}; df = pd.DataFrame([frame])
+    app_module.render_benchmark_results(df, "/tmp/results.csv", True); app_module.render_live_yolo_results(df, "/tmp/results.csv", True)
+    labels = [call.args[0] for call in st.metric.call_args_list + st.download_button.call_args_list]; tables = [call.args[0] for call in st.dataframe.call_args_list]
+    assert {"Model", "Family", "Mean latency (ms)", "Recognized classes"} <= set(tables[0].columns) and {"preprocess_mean_ms", "inference_mean_ms"} <= set(tables[-1].columns)
+    assert {"Lowest mean latency", "Highest effective FPS", "Mean latency", "Mean inference", "Frames processed"} <= set(labels) and [call.args[0].layout.title.text for call in st.plotly_chart.call_args_list] == ["Latency by model", "Effective FPS", "Computational complexity vs runtime"]
+    assert "Recognition by model" in " ".join(str(call.args[0]) for call in st.markdown.call_args_list) and "Recognized:" in " ".join(str(call.args[0]) for call in st.markdown.call_args_list)
