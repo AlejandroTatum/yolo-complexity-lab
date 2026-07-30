@@ -88,6 +88,9 @@ DEVICE_HELP = {
 }
 DEVICE_OPTIONS = CAPABILITIES.device_options
 
+NAVIGATION_TABS = ("Overview", "Benchmark", "About")
+AUTHOR_NAME = "Alejandro Padilla"
+
 METRIC_EXPLANATIONS = {
     "Latencia": "Tiempo que tarda el modelo en procesar un frame. Menor es mejor.",
     "FPS": "Frames por segundo efectivos. Mayor es mejor para tiempo real.",
@@ -497,17 +500,31 @@ def dependency_warning() -> None:
         )
 
 
+def render_evidence_path(df: pd.DataFrame | None = None) -> None:
+    if df is None or df.empty:
+        st.info(
+            "Evidence is unavailable until a benchmark runs. Use the Benchmark tab "
+            "to select a source, measure the models, inspect the results, and download the CSV."
+        )
+        return
+    st.success(
+        f"Evidence available for {len(df)} model(s): measured input → runtime metrics "
+        "→ visual detections → CSV export."
+    )
+
+
 def render_hero(presentation_mode: bool = False) -> None:
     subtitle = (
-        "Evolución de detectores, reconocimiento y tiempo real en una demo local."
+        "A measured comparison of detector recognition, latency, FPS, and computational cost."
         if presentation_mode
-        else "Compara detectores antiguos y YOLO por reconocimiento, latencia, FPS y costo computacional."
+        else "Compare classic detectors and YOLO through recognition, latency, FPS, and computational cost."
     )
     st.markdown(
         f"""
 <div class="hero">
-  <div class="hero-kicker">Laboratorio local de complejidad computacional</div>
+  <div class="hero-kicker">A computer-vision complexity lab</div>
   <div class="hero-title">YOLO Complexity Lab</div>
+  <div class="hero-subtitle">Built by {AUTHOR_NAME}</div>
   <div class="hero-subtitle">
     {subtitle}
   </div>
@@ -1011,46 +1028,46 @@ def render_model_overview() -> None:
     c1, c2, c3 = st.columns(3)
     with c1:
         render_card(
-            "1. YOLO actual",
-            "Arrancá con webcam: una pasada por frame para mostrar tiempo real.",
+            "1. Live YOLO",
+            "Start with a local webcam: one forward pass per frame makes the real-time trade-off visible.",
             "orange",
         )
     with c2:
         render_card(
-            "2. Comparación",
-            "Luego medí Faster R-CNN, SSDlite y YOLO con la misma imagen.",
+            "2. Comparison",
+            "Measure Faster R-CNN, SSDlite, and YOLO with the same input and settings.",
             "green",
         )
     with c3:
         render_card(
-            "3. Conclusión",
-            "Usá latencia, FPS y n = H×W para explicar complejidad.",
+            "3. Conclusion",
+            "Use latency, FPS, and n = H×W to explain the measured complexity trade-off.",
             "violet",
         )
 
 
 def render_theory_bridge() -> None:
-    st.markdown("<h2 class='section-title'>De la teoría a la demo</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 class='section-title'>From theory to measured evidence</h2>", unsafe_allow_html=True)
     cols = st.columns(4)
     cards = [
         (
-            "Problema",
-            "Detectar implica localizar y clasificar varios objetos. Los pipelines antiguos repetían trabajo y aumentaban latencia.",
+            "Question",
+            "Object detection must locate and classify several objects. The YOLO-versus-CNN question is whether a single pass reduces runtime cost.",
             "amber",
         ),
         (
-            "Idea YOLO",
-            "Convertir detección en una regresión única: una pasada hacia adelante sobre la imagen completa.",
+            "Method",
+            "Run the same input through selected detectors and compare runtime, effective FPS, model cost, and recognized classes.",
             "orange",
         ),
         (
-            "Costo dominante",
-            "Las convoluciones explican el crecimiento principal: resolución, capas, canales y kernel elevan operaciones.",
+            "Cost model",
+            "Convolutions dominate growth: resolution, layers, channels, and kernel size increase the operation count.",
             "violet",
         ),
         (
-            "Evidencia local",
-            "La app cruza Big-O con GFLOPs, parámetros, RAM, latencia, FPS y clases reconocidas.",
+            "Evidence",
+            "The benchmark connects Big-O with GFLOPs, parameters, latency, FPS, and recognized classes, then exports measured rows to CSV.",
             "green",
         ),
     ]
@@ -1070,9 +1087,9 @@ def render_metric_glossary() -> None:
 def render_explanation_flow() -> None:
     steps = st.columns(3)
     content = [
-        ("Tiempo", "Latencia media/p95 y FPS efectivo."),
-        ("Complejidad", "n = H×W, GFLOPs y parámetros."),
-        ("Reconocimiento", "Sirve como apoyo visual, no como mAP formal."),
+        ("Runtime", "Mean and p95 latency plus effective FPS."),
+        ("Complexity", "n = H×W, GFLOPs, and parameter count."),
+        ("Recognition", "A visual aid for this input, not a formal mAP evaluation."),
     ]
     accents = ["blue", "green", "violet"]
     for col, (title, body), accent in zip(steps, content, accents, strict=False):
@@ -1371,7 +1388,7 @@ def render_controls_guide() -> None:
 
 inject_css()
 
-# JavaScript para prevenir colapso del sidebar
+# JavaScript to prevent sidebar collapse
 st.markdown(
     """
     <script>
@@ -1403,14 +1420,8 @@ st.markdown(
 )
 
 dependency_warning()
-render_hero(True)
 
 with st.sidebar:
-    st.markdown("### Configuración del benchmark")
-    
-    if CAPABILITIES.is_cloud:
-        st.info("🔒 **Modo deploy activo.** Webcam y streaming no disponibles en el navegador. Usa *Demo* o *Subir imagen*.", icon="ℹ️")
-    
     # Detectar cambio de ruta para limpiar resultados viejos
     previous_route = st.session_state.get("comparison_route", None)
     
@@ -1428,12 +1439,8 @@ with st.sidebar:
         st.session_state.pop("pending_streaming_results", None)
     
     st.session_state["comparison_route"] = comparison_route
-    st.caption(PRESET_HELP[comparison_route])
 
     selected_models = PRESET_MODELS[comparison_route]
-    st.markdown("**Modelos de la ruta:**")
-    for index, key in enumerate(selected_models, start=1):
-        st.caption(f"{index}. {MODEL_CATALOG[key].display_name}")
 
     source_options = list(SOURCE_HELP.keys())
     default_source = "Demo persona/perro/fruta" if CAPABILITIES.is_cloud else ("Webcam OpenCV local" if comparison_route == "YOLO actual en vivo" else "Demo persona/perro/fruta")
@@ -1513,18 +1520,37 @@ with st.sidebar:
 
         pass
 
-inicio_tab, benchmark_tab = st.tabs(
-    ["Inicio", "Benchmark"]
-)
+def render_navigation_tabs():
+    return st.tabs(NAVIGATION_TABS)
 
-with inicio_tab:
-    st.markdown("<h2 class='section-title'>Ruta de comparación</h2>", unsafe_allow_html=True)
+
+overview_tab, benchmark_tab, about_tab = render_navigation_tabs()
+
+with overview_tab:
+    render_hero(True)
     render_model_overview()
-    st.markdown("<h2 class='section-title'>Uso rápido</h2>", unsafe_allow_html=True)
+    render_evidence_path(st.session_state.get("last_benchmark_df"))
+    render_theory_bridge()
+    st.markdown("<h2 class='section-title'>How to read the benchmark</h2>", unsafe_allow_html=True)
     render_explanation_flow()
     st.write("")
     with st.expander("Ver glosario de métricas"):
         render_metric_glossary()
+
+with about_tab:
+    st.markdown(
+        f"""
+<h2 class='section-title'>About this project</h2>
+<p><strong>Built by {AUTHOR_NAME}.</strong> This portfolio experiment examines the YOLO-versus-CNN complexity question.</p>
+<h3>Purpose</h3>
+<p>Understand how detector architecture affects runtime, computational cost, and visual recognition.</p>
+<h3>Method</h3>
+<p>Use the same input and measured settings across selected detectors, then compare latency, FPS, complexity proxies, and recognized classes.</p>
+<h3>Evidence path</h3>
+<p>Open Benchmark to choose a source, run the measurement, inspect the evidence, and export the session results as CSV.</p>
+        """,
+        unsafe_allow_html=True,
+    )
 
 with benchmark_tab:
     title = "YOLO actual en vivo" if streaming_mode else "Benchmark de tiempo y complejidad"
