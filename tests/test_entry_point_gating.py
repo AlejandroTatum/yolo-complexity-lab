@@ -4,6 +4,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 import streamlit
@@ -160,3 +161,35 @@ def test_cloud_benchmark_preserves_session_and_csv_flow(
     assert all(config.measure_frames == 20 and config.warmup_frames == 3 for _, _, config in calls)
     assert app_module.st.session_state["last_benchmark_df"].shape[0] == len(calls)
     assert app_module.st.session_state["last_benchmark_csv_path"] == str(tmp_path / "results.csv")
+
+
+def test_navigation_shell_orders_tabs_and_exposes_author_and_evidence_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capabilities = SimpleNamespace(
+        is_cloud=True,
+        webcam=False,
+        streaming=False,
+        custom_weights=False,
+        device_options=("cpu",),
+        device_default="cpu",
+    )
+    app_module, _ = load_app(monkeypatch, capabilities)
+
+    tab_calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        app_module.st,
+        "tabs",
+        lambda labels: tab_calls.append(tuple(labels)) or ("overview", "benchmark", "about"),
+    )
+    assert app_module.render_navigation_tabs() == ("overview", "benchmark", "about")
+    assert tab_calls == [("Overview", "Benchmark", "About")]
+
+    fake_streamlit = MagicMock()
+    monkeypatch.setattr(app_module, "st", fake_streamlit)
+    app_module.render_hero(True)
+    app_module.render_evidence_path()
+
+    rendered = " ".join(str(call.args[0]) for call in fake_streamlit.markdown.call_args_list)
+    assert "Built by Alejandro Padilla" in rendered
+    assert "Evidence is unavailable" in str(fake_streamlit.info.call_args.args[0])
