@@ -18,10 +18,17 @@ from yolo_complexity_lab.environment import detect_capabilities
 ROOT = Path(__file__).parents[1]
 
 
-def load_app(monkeypatch: pytest.MonkeyPatch, capabilities: SimpleNamespace, run: bool = False):
+def load_app(
+    monkeypatch: pytest.MonkeyPatch,
+    capabilities: SimpleNamespace,
+    run: bool = False,
+    source_kind: str | None = None,
+    session_state: dict | None = None,
+):
     widgets: list[tuple[str, tuple[object, ...]]] = []
     monkeypatch.setattr(environment_module, "detect_capabilities", lambda *_: capabilities)
-    monkeypatch.setattr(streamlit, "session_state", type("State", (dict,), {"__getattr__": dict.__getitem__, "__setattr__": dict.__setitem__})())
+    state = session_state if session_state is not None else type("State", (dict,), {"__getattr__": dict.__getitem__, "__setattr__": dict.__setitem__})()
+    monkeypatch.setattr(streamlit, "session_state", state)
     monkeypatch.setattr(streamlit, "cache_resource", lambda **_: lambda function: function)
 
     def radio(label: str, options, **_: object):
@@ -32,6 +39,8 @@ def load_app(monkeypatch: pytest.MonkeyPatch, capabilities: SimpleNamespace, run
     def selectbox(label: str, options, index: int = 0, **_: object):
         values = tuple(options)
         widgets.append((label, values))
+        if label == "Frame source" and source_kind is not None:
+            return source_kind
         return values[index]
 
     monkeypatch.setattr(streamlit, "radio", radio)
@@ -45,6 +54,51 @@ def load_app(monkeypatch: pytest.MonkeyPatch, capabilities: SimpleNamespace, run
     monkeypatch.setitem(sys.modules, name, module)
     spec.loader.exec_module(module)
     return module, widgets
+
+
+def test_empty_standard_source_does_not_consume_notice_before_real_first_load(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from yolo_complexity_lab import benchmark as benchmark_module, catalog as catalog_module, exporting as exporting_module, loaders as loaders_module, sources as sources_module
+
+    capabilities = SimpleNamespace(is_cloud=True, webcam=False, streaming=False, custom_weights=False, device_options=("cpu",), device_default="cpu")
+    state = type("State", (dict,), {"__getattr__": dict.__getitem__, "__setattr__": dict.__setitem__})()
+    events: list[tuple[str, str]] = []
+    load_calls: list[str] = []
+
+    class BenchmarkStopped(Exception):
+        pass
+
+    monkeypatch.setattr(streamlit, "file_uploader", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(streamlit, "stop", lambda: (_ for _ in ()).throw(BenchmarkStopped()))
+    monkeypatch.setattr(streamlit, "info", lambda message: events.append(("info", str(message))))
+    monkeypatch.setattr(streamlit, "error", lambda message: events.append(("error", str(message))))
+    monkeypatch.setattr(streamlit, "warning", lambda message: events.append(("warning", str(message))))
+
+    with pytest.raises(BenchmarkStopped):
+        load_app(monkeypatch, capabilities, run=True, source_kind="Upload image", session_state=state)
+
+    assert "cold_start_notice_shown" not in state
+    assert not load_calls
+
+    frame = np.zeros((2, 2, 3), dtype=np.uint8)
+    def fake_load(model_key: str, device: str):
+        load_calls.append(model_key)
+        events.append(("load", model_key))
+        return SimpleNamespace(spec=catalog_module.MODEL_CATALOG[model_key], device=device)
+
+    monkeypatch.setattr(loaders_module, "load_model", fake_load)
+    monkeypatch.setattr(benchmark_module, "benchmark_model", lambda loaded, frames, config, include_complexity=True: {"model": loaded.spec.display_name, "family": loaded.spec.family, "latency_mean_ms": 10.0, "fps_effective": 100.0, "gflops_approx": 1.0, "parameters_millions": 2.0, "detections_mean": 1.0})
+    monkeypatch.setattr(sources_module, "sample_coco_frame", lambda: frame)
+    monkeypatch.setattr(sources_module, "repeat_frame", lambda value, count: [value] * count)
+    monkeypatch.setattr(exporting_module, "write_results_csv", lambda _df: tmp_path / "results.csv")
+
+    load_app(monkeypatch, capabilities, run=True, source_kind="Person/dog/fruit demo", session_state=state)
+
+    cold_start_events = [event for event in events if "weights download" in event[1]]
+    assert len(cold_start_events) == 1
+    assert load_calls
+    assert events.index(cold_start_events[0]) < next(index for index, event in enumerate(events) if event[0] == "load")
 
 
 @pytest.mark.parametrize(
@@ -133,6 +187,197 @@ def test_failed_webcam_open_releases_capture(monkeypatch: pytest.MonkeyPatch) ->
     assert result == {}
     assert capture.release_calls == 1
     assert errors == ["Unable to open webcam index 7. Check permissions, connection, and camera availability."]
+
+
+def test_operational_states_are_actionable_and_cold_start_is_scoped(monkeypatch: pytest.MonkeyPatch) -> None:
+    capabilities = SimpleNamespace(is_cloud=True, webcam=False, streaming=False, custom_weights=False, device_options=("cpu",), device_default="cpu")
+    app_module, _ = load_app(monkeypatch, capabilities)
+    fake_streamlit = MagicMock()
+    fake_streamlit.session_state = {}
+    monkeypatch.setattr(app_module, "st", fake_streamlit)
+
+    app_module.render_cold_start_notice()
+    app_module.render_cold_start_notice()
+
+    assert fake_streamlit.info.call_count == 1
+    assert "weights download" in fake_streamlit.info.call_args.args[0]
+    app_module.render_benchmark_results(pd.DataFrame())
+    assert "No benchmark evidence is available yet" in fake_streamlit.info.call_args.args[0]
+    for state, renderer in (("empty", fake_streamlit.info), ("partial", fake_streamlit.warning), ("failure", fake_streamlit.error), ("active_stream", fake_streamlit.info)):
+        app_module.render_operational_state(state, "Recovery detail.")
+        assert "Recovery detail." in renderer.call_args.args[0]
+
+
+def test_streaming_read_failure_is_bounded_and_actionable(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = importlib.util.spec_from_file_location("app_stream_failure", ROOT / "app.py")
+    assert spec is not None and spec.loader is not None
+    app_module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, app_module)
+    spec.loader.exec_module(app_module)
+
+    class FakeCapture:
+        def __init__(self) -> None:
+            self.release_calls = 0
+
+        def isOpened(self) -> bool:
+            return True
+
+        def read(self) -> tuple[bool, object]:
+            return False, None
+
+        def release(self) -> None:
+            self.release_calls += 1
+
+    capture = FakeCapture()
+    stop_column = MagicMock()
+    stop_column.button.return_value = False
+    stop_placeholder = MagicMock()
+    stop_placeholder.columns.return_value = [MagicMock(), stop_column]
+    fake_streamlit = MagicMock()
+    fake_streamlit.session_state = {}
+    fake_streamlit.empty.side_effect = [MagicMock(), MagicMock(), stop_placeholder]
+    errors: list[str] = []
+    fake_streamlit.error.side_effect = errors.append
+    monkeypatch.setattr(app_module, "st", fake_streamlit)
+    monkeypatch.setattr(app_module, "CAPABILITIES", SimpleNamespace(streaming=True))
+    monkeypatch.setitem(sys.modules, "cv2", SimpleNamespace(VideoCapture=lambda _: capture))
+
+    result = app_module.run_webcam_benchmark_streaming(object(), 32, 0.25, 0.45, "cpu", 3, 1)
+
+    assert result == {}
+    assert capture.release_calls == 1
+    assert any("stopped providing frames" in message for message in errors)
+
+
+def test_streaming_predict_failures_are_bounded_and_cleaned_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = importlib.util.spec_from_file_location("app_stream_predict_failure", ROOT / "app.py")
+    assert spec is not None and spec.loader is not None
+    app_module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, app_module)
+    spec.loader.exec_module(app_module)
+
+    frame = np.zeros((2, 2, 3), dtype=np.uint8)
+
+    class FakeCapture:
+        def __init__(self) -> None:
+            self.read_calls = 0
+            self.release_calls = 0
+
+        def isOpened(self) -> bool:
+            return True
+
+        def read(self) -> tuple[bool, np.ndarray]:
+            self.read_calls += 1
+            return True, frame
+
+        def release(self) -> None:
+            self.release_calls += 1
+
+    class FailingModel:
+        def __init__(self) -> None:
+            self.predict_calls = 0
+
+        def predict(self, **_: object) -> list[object]:
+            self.predict_calls += 1
+            raise RuntimeError("predict failed")
+
+    capture = FakeCapture()
+    model = FailingModel()
+    stop_column = MagicMock()
+    stop_column.button.return_value = False
+    stop_placeholder = MagicMock()
+    stop_placeholder.columns.return_value = [MagicMock(), stop_column]
+    fake_streamlit = MagicMock()
+    fake_streamlit.session_state = {}
+    fake_streamlit.empty.side_effect = [MagicMock(), MagicMock(), stop_placeholder]
+    errors: list[str] = []
+    warnings: list[str] = []
+    fake_streamlit.error.side_effect = errors.append
+    fake_streamlit.warning.side_effect = warnings.append
+    monkeypatch.setattr(app_module, "st", fake_streamlit)
+    monkeypatch.setattr(app_module, "CAPABILITIES", SimpleNamespace(streaming=True))
+    monkeypatch.setitem(
+        sys.modules,
+        "cv2",
+        SimpleNamespace(
+            VideoCapture=lambda _: capture,
+            resize=lambda *_args, **_kwargs: frame,
+            INTER_LINEAR=0,
+        ),
+    )
+
+    loaded = SimpleNamespace(
+        spec=SimpleNamespace(backend="ultralytics"),
+        model=model,
+    )
+    result = app_module.run_webcam_benchmark_streaming(
+        loaded, 32, 0.25, 0.45, "cpu", 3, measure_frames=None
+    )
+
+    assert result == {}
+    assert model.predict_calls == 3
+    assert capture.read_calls == 3
+    assert capture.release_calls == 1
+    assert any("repeated frame errors" in message for message in errors)
+    assert len(warnings) == 3
+    assert fake_streamlit.session_state["streaming_active"] is False
+    assert fake_streamlit.session_state["stream_stop_requested"] is False
+
+
+def test_download_labels_identify_complete_and_live_exports(monkeypatch: pytest.MonkeyPatch) -> None:
+    capabilities = SimpleNamespace(is_cloud=True, webcam=False, streaming=False, custom_weights=False, device_options=("cpu",), device_default="cpu")
+    app_module, _ = load_app(monkeypatch, capabilities)
+    fake_streamlit = MagicMock()
+    fake_streamlit.columns.side_effect = lambda count: [MagicMock() for _ in range(count)]
+    fake_streamlit.session_state = {"annotated_frames": {}}
+    monkeypatch.setattr(app_module, "st", fake_streamlit)
+    results = pd.DataFrame([{"model": "YOLO", "family": "YOLO", "latency_mean_ms": 20.0, "fps_effective": 50.0, "gflops_approx": 2.0, "parameters_millions": 1.5, "detections_mean": 2.0, "frames_measured": 2, "inference_mean_ms": 12.0, "latency_p95_ms": 25.0}])
+
+    app_module.render_benchmark_results(results, "/tmp/benchmark.csv", presentation_mode=True)
+    app_module.render_live_yolo_results(results, "/tmp/live.csv", presentation_mode=True)
+
+    labels = [call.args[0] for call in fake_streamlit.download_button.call_args_list]
+    assert "Download benchmark results CSV" in labels
+    assert "Download summary CSV" in labels
+    assert fake_streamlit.download_button.call_args_list[-1].kwargs["file_name"] == "yolo_live_summary.csv"
+
+
+def test_partial_benchmark_preserves_successes_and_explains_recovery(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from yolo_complexity_lab import benchmark as benchmark_module, exporting as exporting_module, loaders as loaders_module, sources as sources_module
+    capabilities = SimpleNamespace(is_cloud=True, webcam=False, streaming=False, custom_weights=False, device_options=("cpu",), device_default="cpu")
+    frame = np.zeros((2, 2, 3), dtype=np.uint8)
+    failed_key = "fasterrcnn_mobilenet_fpn"
+
+    def fake_load(model_key: str, device: str):
+        if model_key == failed_key:
+            raise RuntimeError("weights unavailable")
+        return SimpleNamespace(spec=type("Spec", (), {"key": model_key, "display_name": model_key, "family": "YOLO"})(), device=device)
+
+    def fake_benchmark(loaded, frames, config, include_complexity=True):
+        return {"model": loaded.spec.display_name, "family": loaded.spec.family, "latency_mean_ms": 10.0, "fps_effective": 100.0, "gflops_approx": 1.0, "parameters_millions": 2.0, "detections_mean": 1.0}
+
+    monkeypatch.setattr(loaders_module, "load_model", fake_load)
+    monkeypatch.setattr(benchmark_module, "benchmark_model", fake_benchmark)
+    monkeypatch.setattr(sources_module, "sample_coco_frame", lambda: frame)
+    monkeypatch.setattr(sources_module, "repeat_frame", lambda value, count: [value] * count)
+    monkeypatch.setattr(exporting_module, "write_results_csv", lambda _df: tmp_path / "partial.csv")
+    errors: list[str] = []
+    infos: list[str] = []
+    warnings: list[str] = []
+    monkeypatch.setattr(streamlit, "error", lambda message: errors.append(str(message)))
+    monkeypatch.setattr(streamlit, "info", lambda message: infos.append(str(message)))
+    monkeypatch.setattr(streamlit, "warning", lambda message: warnings.append(str(message)))
+
+    app_module, _ = load_app(monkeypatch, capabilities, run=True)
+
+    assert app_module.st.session_state["last_benchmark_df"].shape[0] == 2
+    assert any("weights unavailable" in message and "retry" in message for message in errors)
+    assert any("Partial results are available" in message and "2 of 3" in message for message in warnings)
+    assert sum("weights download" in message for message in infos) == 1
 
 
 def test_reachable_live_results_render_english_copy(monkeypatch: pytest.MonkeyPatch) -> None:

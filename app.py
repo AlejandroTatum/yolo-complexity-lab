@@ -500,6 +500,48 @@ def dependency_warning() -> None:
         )
 
 
+OPERATIONAL_MESSAGES = {
+    "cold_start": (
+        "The first run may take longer while model weights download and the local cache initializes. "
+        "Later runs reuse cached weights."
+    ),
+    "loading": "Loading models and measuring frames. Keep this page open until the run finishes.",
+    "empty": (
+        "No benchmark evidence is available yet. Choose a source and run a measurement "
+        "to generate results."
+    ),
+    "partial": (
+        "Partial results are available. Review the model warnings above, then retry the "
+        "failed models after checking their weights and dependencies."
+    ),
+    "failure": (
+        "No usable benchmark results were produced. Check dependencies, model weights, "
+        "source access, and device availability, then retry."
+    ),
+    "active_stream": (
+        "Live streaming is active. Frames are measured continuously; press Stop to finish "
+        "and view the summary."
+    ),
+}
+
+
+def render_operational_state(state: str, detail: str = "") -> None:
+    """Show concise status and recovery guidance for a user-visible run state."""
+    message = OPERATIONAL_MESSAGES.get(state, "")
+    if detail:
+        message = f"{message} {detail}".strip()
+    renderer = st.error if state == "failure" else st.warning if state == "partial" else st.info
+    renderer(message)
+
+
+def render_cold_start_notice() -> None:
+    """Explain model initialization once per session, immediately before loading."""
+    if st.session_state.get("cold_start_notice_shown", False):
+        return
+    st.session_state["cold_start_notice_shown"] = True
+    render_operational_state("cold_start")
+
+
 def render_evidence_path(df: pd.DataFrame | None = None) -> None:
     if df is None or df.empty:
         st.info(
@@ -662,6 +704,8 @@ def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: f
             "Check permissions, connection, and camera availability."
         )
         return {}
+
+    st.session_state["streaming_active"] = True
     
     placeholder_video = st.empty()
     placeholder_stats = st.empty()
@@ -677,7 +721,7 @@ def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: f
     
     frame_count = 0
 
-    # Inicializar flag de parada en session_state y renderizar botón una sola vez
+    # Initialize the stop flag in session state and render the button once.
     if "stream_stop_requested" not in st.session_state:
         st.session_state["stream_stop_requested"] = False
 
@@ -685,8 +729,11 @@ def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: f
     if stop_col.button("Stop", key="stop_btn_stream"):
         st.session_state["stream_stop_requested"] = True
 
+    render_operational_state("active_stream")
+    consecutive_read_failures = 0
+    consecutive_frame_failures = 0
+
     try:
-        # Streaming en vivo: si measure_frames es None, iteramos hasta que el usuario pare
         while True:
             # Si el usuario solicitó parar, salimos del loop
             if st.session_state.get("stream_stop_requested", False):
@@ -696,7 +743,15 @@ def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: f
             
             success, frame = cap.read()
             if not success:
+                consecutive_read_failures += 1
+                if consecutive_read_failures >= 3:
+                    st.error(
+                        f"Webcam index {camera_index} stopped providing frames. "
+                        "Check camera permissions and connection, then retry."
+                    )
+                    break
                 continue
+            consecutive_read_failures = 0
             
             # Redimensionar
             frame_resized = cv2.resize(frame, (imgsz, imgsz), interpolation=cv2.INTER_LINEAR)
@@ -765,6 +820,7 @@ def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: f
                     timings["detections"].append(detections_count)
                     
                     frame_count += 1
+                    consecutive_frame_failures = 0
                     
                     # --- NUEVO: GUARDADO CONTINUO ---
                     # Hacemos una copia de seguridad en cada frame. Si el botón 'Parar' mata 
@@ -791,7 +847,8 @@ def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: f
                     with placeholder_video.container():
                         col_img, col_info = st.columns([3, 1])
                         with col_img:
-                            col_img.image(annotated_rgb, caption=f"Live frame {frame_count}/{measure_frames}", channels="RGB", width="stretch")
+                            frame_label = f"Live frame {frame_count}" if measure_frames is None else f"Live frame {frame_count}/{measure_frames}"
+                            col_img.image(annotated_rgb, caption=frame_label, channels="RGB", width="stretch")
                         with col_info:
                             st.metric("Detections", detections_count)
                     
@@ -844,7 +901,14 @@ def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: f
                     break
                     
             except Exception as e:
-                st.warning(f"Frame {frame_count}: {str(e)[:100]}")
+                consecutive_frame_failures += 1
+                st.warning(f"Frame {frame_count + 1} could not be measured: {str(e)[:100]}")
+                if consecutive_frame_failures >= 3:
+                    st.error(
+                        "Streaming stopped after repeated frame errors. "
+                        "Check model compatibility and device availability, then retry."
+                    )
+                    break
                 continue
             
             time.sleep(0.02)
@@ -871,6 +935,7 @@ def run_webcam_benchmark_streaming(loaded, imgsz: int, confidence: float, iou: f
         cap.release()
         try:
             st.session_state["stream_stop_requested"] = False
+            st.session_state["streaming_active"] = False
         except Exception:
             pass
 
@@ -1377,7 +1442,7 @@ def render_live_yolo_results(df: pd.DataFrame, csv_path: str | None = None, pres
     st.download_button(
         "Download summary CSV",
         csv_bytes,
-        file_name="yolo_en_vivo_resumen.csv",
+        file_name="yolo_live_summary.csv",
         mime="text/csv",
         key="download_live_yolo_csv",
         on_click="ignore",
@@ -1392,6 +1457,7 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, pres
     st.session_state instead of losing it after export actions.
     """
     if df.empty:
+        render_operational_state("empty")
         return
 
     if is_streaming:
@@ -1676,7 +1742,7 @@ with benchmark_tab:
             st.error("Select at least one model to start the benchmark.")
             st.stop()
         
-        # Modo streaming con webcam
+        # Live webcam streaming mode
         if source_kind == "Local OpenCV webcam" and streaming_mode:
             if len(selected_models) > 1:
                 st.warning("Streaming benchmarks support one model at a time. The first selected model will be used.")
@@ -1685,10 +1751,12 @@ with benchmark_tab:
             spec = MODEL_CATALOG[model_key]
             
             st.markdown(f"<h3>Live streaming: {spec.display_name}</h3>", unsafe_allow_html=True)
-            st.info(f"Capturing real-time frames from camera {st.session_state.get('camera_index', 0)}. Press 'Stop' to finish and view the summary.")
+            st.info(f"Capturing frames from camera {st.session_state.get('camera_index', 0)}. Press Stop to finish and view the summary.")
             
             try:
                 st.session_state.streaming_active = True
+                render_operational_state("loading", f"Loading {spec.display_name}.")
+                render_cold_start_notice()
                 loaded = cached_load_model(model_key, device)
                 
                 streaming_results = run_webcam_benchmark_streaming(
@@ -1766,7 +1834,8 @@ with benchmark_tab:
                     st.session_state["last_benchmark_csv_path"] = str(export_path)
                     
             except Exception as exc:
-                st.error(f"Streaming error: {exc}")
+                st.session_state["streaming_active"] = False
+                render_operational_state("failure", f"Streaming error: {exc}")
         
         # Modo benchmark estándar
         else:
@@ -1791,8 +1860,10 @@ with benchmark_tab:
 
             for index, model_key in enumerate(selected_models, start=1):
                 spec = MODEL_CATALOG[model_key]
-                status.markdown(f"## Loading model {index} of {len(selected_models)}")
+                status.markdown(f"## Loading {spec.display_name} ({index} of {len(selected_models)})")
+                render_operational_state("loading", f"Preparing {spec.display_name}.")
                 try:
+                    render_cold_start_notice()
                     loaded = cached_load_model(model_key, device)
                     row = benchmark_model(loaded, frames, config, include_complexity=include_complexity)
                     # Store the annotated frame separately; it is not part of the DataFrame.
@@ -1803,13 +1874,20 @@ with benchmark_tab:
                         st.session_state["annotated_frames"][model_key] = annotated_frame
                     rows.append(row)
                 except Exception as exc:
-                    st.error(f"Failed to measure {spec.display_name}: {exc}")
+                    st.error(
+                        f"{spec.display_name} failed: {exc}. Check model weights and dependencies, then retry."
+                    )
                 progress.progress(index / len(selected_models))
 
             status.empty()
             progress.empty()
 
             if rows:
+                if len(rows) < len(selected_models):
+                    render_operational_state(
+                        "partial",
+                        f"{len(rows)} of {len(selected_models)} models completed.",
+                    )
                 df = pd.DataFrame(rows)
                 export_path = write_results_csv(df)
                 st.session_state["last_benchmark_df"] = df
@@ -1818,9 +1896,9 @@ with benchmark_tab:
                 st.session_state.pop("last_html_paths", None)
                 render_benchmark_results(df, str(export_path), True)
             else:
-                st.warning("No model could be measured. Check dependencies, connectivity, or weight availability.")
+                render_operational_state("failure")
     elif "pending_streaming_results" in st.session_state:
-        st.success("Streaming finished. Showing the practical YOLO live summary...")
+        st.success("Streaming finished. Showing the live YOLO summary...")
         
         # Recuperar los datos guardados en el finally
         res = st.session_state.pop("pending_streaming_results")
@@ -1877,7 +1955,7 @@ with benchmark_tab:
         render_benchmark_results(df, str(export_path), True, is_streaming=True)
 
     elif "last_benchmark_df" in st.session_state:
-        st.info("Showing the last benchmark run. You can download its CSV without measuring again.")
+        st.info("Showing the last completed benchmark. You can download its CSV without measuring again.")
         render_benchmark_results(
             st.session_state["last_benchmark_df"],
             st.session_state.get("last_benchmark_csv_path"),
@@ -1888,4 +1966,4 @@ with benchmark_tab:
         if streaming_mode:
             st.info("Start YOLO live to view latency, FPS, and detections from the camera.")
         else:
-            st.info("Run the comparison to generate the table, charts, and CSV.")
+            render_operational_state("empty")
