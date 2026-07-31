@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 import streamlit
 import numpy as np
+import pandas as pd
 
 from yolo_complexity_lab import environment as environment_module
 from yolo_complexity_lab.environment import detect_capabilities
@@ -161,6 +162,79 @@ def test_cloud_benchmark_preserves_session_and_csv_flow(
     assert all(config.measure_frames == 20 and config.warmup_frames == 3 for _, _, config in calls)
     assert app_module.st.session_state["last_benchmark_df"].shape[0] == len(calls)
     assert app_module.st.session_state["last_benchmark_csv_path"] == str(tmp_path / "results.csv")
+    assert list(app_module.st.session_state["last_benchmark_df"]["model"]) == [
+        streamlit_app_model.display_name for streamlit_app_model in [
+            catalog_module.MODEL_CATALOG[key] for key in app_module.PRESET_MODELS["Comparación CNN vs YOLO"]
+        ]
+    ]
+
+
+def test_comparison_winner_deltas_preserve_benchmark_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capabilities = SimpleNamespace(
+        is_cloud=True,
+        webcam=False,
+        streaming=False,
+        custom_weights=False,
+        device_options=("cpu",),
+        device_default="cpu",
+    )
+    app_module, _ = load_app(monkeypatch, capabilities)
+    results = pd.DataFrame(
+        [
+            {"model": "Classic CNN", "latency_mean_ms": 40.0, "fps_effective": 25.0, "gflops_approx": 4.0},
+            {"model": "YOLO", "latency_mean_ms": 20.0, "fps_effective": 50.0, "gflops_approx": 2.0},
+        ]
+    )
+    before = results.copy(deep=True)
+
+    winners = app_module.comparison_winner_deltas(results)
+
+    assert winners["latency_mean_ms"]["model"] == "YOLO"
+    assert winners["latency_mean_ms"]["delta_pct"] == 50.0
+    assert winners["fps_effective"]["model"] == "YOLO"
+    assert winners["gflops_approx"]["model"] == "YOLO"
+    pd.testing.assert_frame_equal(results, before)
+
+    fake_streamlit = MagicMock()
+    metric_columns = [MagicMock() for _ in range(3)]
+    fake_streamlit.columns.return_value = metric_columns
+    monkeypatch.setattr(app_module, "st", fake_streamlit)
+    app_module.render_comparison_presentation(results)
+
+    rendered = " ".join(str(call.args[0]) for call in fake_streamlit.markdown.call_args_list)
+    assert "Measured comparison" in rendered
+    assert "Measured conclusion" in rendered
+    assert metric_columns[0].metric.call_args.args[2] == "50.0% lower than next model"
+    assert metric_columns[1].metric.call_args.args[2] == "100.0% higher than next model"
+    assert metric_columns[2].metric.call_args.args[2] == "50.0% lower than next model"
+
+
+def test_single_model_conclusion_does_not_claim_comparison_lead(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capabilities = SimpleNamespace(
+        is_cloud=True,
+        webcam=False,
+        streaming=False,
+        custom_weights=False,
+        device_options=("cpu",),
+        device_default="cpu",
+    )
+    app_module, _ = load_app(monkeypatch, capabilities)
+    results = pd.DataFrame(
+        [{"model": "YOLO", "latency_mean_ms": 20.0, "fps_effective": 50.0, "gflops_approx": 2.0}]
+    )
+
+    fake_streamlit = MagicMock()
+    fake_streamlit.columns.return_value = [MagicMock() for _ in range(3)]
+    monkeypatch.setattr(app_module, "st", fake_streamlit)
+    app_module.render_comparison_presentation(results)
+
+    rendered = " ".join(str(call.args[0]) for call in fake_streamlit.markdown.call_args_list)
+    assert "Only one model was measured: YOLO." in rendered
+    assert "leads this measured comparison" not in rendered
 
 
 def test_navigation_shell_orders_tabs_and_exposes_author_and_evidence_path(

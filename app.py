@@ -934,6 +934,92 @@ def metric_cards(df: pd.DataFrame, presentation_mode: bool = False) -> None:
     c3.metric(cost_label, cost_value, cost_delta)
 
 
+def comparison_winner_deltas(df: pd.DataFrame) -> dict[str, dict[str, object]]:
+    """Summarize measured winners without changing the benchmark rows."""
+    metric_specs = (
+        ("latency_mean_ms", "Lowest latency", False, "lower"),
+        ("fps_effective", "Highest effective FPS", True, "higher"),
+        ("gflops_approx", "Lowest GFLOPs", False, "lower"),
+    )
+    winners: dict[str, dict[str, object]] = {}
+    for metric, label, higher_is_better, delta_direction in metric_specs:
+        if metric not in df.columns or "model" not in df.columns:
+            continue
+        values = df[["model", metric]].copy()
+        values[metric] = pd.to_numeric(values[metric], errors="coerce")
+        values = values.dropna(subset=[metric]).sort_values(
+            metric, ascending=not higher_is_better, kind="mergesort"
+        )
+        if values.empty:
+            continue
+        winner = values.iloc[0]
+        runner_up = values.iloc[1] if len(values) > 1 else None
+        delta_pct = None
+        if runner_up is not None and float(runner_up[metric]) != 0:
+            difference = float(winner[metric]) - float(runner_up[metric])
+            delta_pct = round(abs(difference) / abs(float(runner_up[metric])) * 100, 1)
+        winners[metric] = {
+            "label": label,
+            "model": str(winner["model"]),
+            "value": float(winner[metric]),
+            "delta_pct": delta_pct,
+            "delta_direction": delta_direction,
+        }
+    return winners
+
+
+def render_comparison_presentation(df: pd.DataFrame) -> None:
+    """Present measured winners and a concise, evidence-bound conclusion."""
+    winners = comparison_winner_deltas(df)
+    if not winners:
+        return
+
+    st.markdown("<h3 class='section-title'>Measured comparison</h3>", unsafe_allow_html=True)
+    columns = st.columns(len(winners))
+    value_suffixes = {
+        "latency_mean_ms": (" ms", 1),
+        "fps_effective": (" FPS", 1),
+        "gflops_approx": (" G", 2),
+    }
+    for column, (metric, result) in zip(columns, winners.items(), strict=False):
+        suffix, decimals = value_suffixes[metric]
+        value = f"{result['value']:.{decimals}f}{suffix}"
+        delta = result["delta_pct"]
+        delta_text = (
+            f"{delta:.1f}% {result['delta_direction']} than next model"
+            if delta is not None
+            else "Only measured model"
+        )
+        column.metric(result["label"], value, delta_text)
+
+    latency_winner = winners.get("latency_mean_ms")
+    fps_winner = winners.get("fps_effective")
+    if latency_winner and fps_winner:
+        measured_models = df["model"].dropna().astype(str).unique()
+        if len(measured_models) == 1:
+            conclusion = f"Only one model was measured: {measured_models[0]}."
+        elif latency_winner["model"] == fps_winner["model"]:
+            conclusion = (
+                f"{latency_winner['model']} leads this measured comparison on both latency "
+                f"and effective FPS."
+            )
+        else:
+            conclusion = (
+                f"{latency_winner['model']} has the lowest measured latency, while "
+                f"{fps_winner['model']} reaches the highest effective FPS."
+            )
+        conclusion += " The conclusion is limited to the selected input, device, and benchmark settings."
+        st.markdown(
+            f"""
+<div class="glass-card card-accent-orange">
+  <span class="small-label">Measured conclusion</span>
+  <p>{conclusion}</p>
+</div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 def plot_results(df: pd.DataFrame) -> list[tuple[str, object]]:
     plots = []
     if df.empty:
@@ -1313,6 +1399,7 @@ def render_benchmark_results(df: pd.DataFrame, csv_path: str | None = None, pres
         return
 
     metric_cards(df, presentation_mode)
+    render_comparison_presentation(df)
 
     render_detection_summary(df)
 
