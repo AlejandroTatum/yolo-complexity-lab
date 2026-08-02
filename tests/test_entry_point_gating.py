@@ -8,6 +8,8 @@ from types import SimpleNamespace
 import pytest
 import streamlit
 import numpy as np
+import pandas as pd
+from unittest.mock import MagicMock
 
 from yolo_complexity_lab import environment as environment_module
 from yolo_complexity_lab.environment import detect_capabilities
@@ -83,14 +85,14 @@ def test_app_renders_environment_gated_routes_sources_and_devices(
     local_app, local_widgets = load_app(monkeypatch, local)
     cloud_app, cloud_widgets = load_app(monkeypatch, cloud)
 
-    assert set(local_app.PRESET_MODELS) == {"YOLO actual en vivo", "Comparación CNN vs YOLO", "Custom weights"}
-    assert set(cloud_app.PRESET_MODELS) == {"Comparación CNN vs YOLO"}
-    local_source = next(options for label, options in local_widgets if label == "Fuente de frames")
-    cloud_source = next(options for label, options in cloud_widgets if label == "Fuente de frames")
-    assert "Webcam OpenCV local" in local_source
-    assert "Webcam OpenCV local" not in cloud_source
-    assert next(options for label, options in local_widgets if label == "Dispositivo de ejecución") == ("auto", "cpu")
-    assert next(options for label, options in cloud_widgets if label == "Dispositivo de ejecución") == ("cpu",)
+    assert set(local_app.PRESET_MODELS) == {"Live YOLO", "CNN vs YOLO comparison", "Custom weights"}
+    assert set(cloud_app.PRESET_MODELS) == {"CNN vs YOLO comparison"}
+    local_source = next(options for label, options in local_widgets if label == "Frame source")
+    cloud_source = next(options for label, options in cloud_widgets if label == "Frame source")
+    assert "Local OpenCV webcam" in local_source
+    assert "Local OpenCV webcam" not in cloud_source
+    assert next(options for label, options in local_widgets if label == "Execution device") == ("auto", "cpu")
+    assert next(options for label, options in cloud_widgets if label == "Execution device") == ("cpu",)
 
 
 def test_failed_webcam_open_releases_capture(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -155,8 +157,39 @@ def test_cloud_benchmark_preserves_session_and_csv_flow(
 
     app_module, _ = load_app(monkeypatch, cloud, run=True)
 
-    assert [key for key, _, _ in calls] == app_module.PRESET_MODELS["Comparación CNN vs YOLO"]
+    assert [key for key, _, _ in calls] == app_module.PRESET_MODELS["CNN vs YOLO comparison"]
     assert all(frames for _, frames, _ in calls)
     assert all(config.measure_frames == 20 and config.warmup_frames == 3 for _, _, config in calls)
     assert app_module.st.session_state["last_benchmark_df"].shape[0] == len(calls)
     assert app_module.st.session_state["last_benchmark_csv_path"] == str(tmp_path / "results.csv")
+
+
+def test_overview_keeps_three_step_comparison_and_evidence_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capabilities = SimpleNamespace(is_cloud=True, webcam=False, streaming=False, custom_weights=False, device_options=("cpu",), device_default="cpu")
+    app_module, _ = load_app(monkeypatch, capabilities)
+    fake_streamlit = MagicMock(); fake_streamlit.columns.side_effect = lambda count: [fake_streamlit] * count
+    monkeypatch.setattr(app_module, "st", fake_streamlit)
+    app_module.render_evidence_path()
+    app_module.render_model_overview()
+    rendered = " ".join(str(call.args[0]) for call in fake_streamlit.markdown.call_args_list)
+    assert app_module.NAVIGATION_TABS == ("Overview", "Benchmark", "About") and "Evidence is unavailable" in str(fake_streamlit.info.call_args.args[0]) and all(label in rendered for label in ("1. Live YOLO", "2. Comparison", "3. Conclusion"))
+
+
+def test_comparison_results_expose_english_labels_and_all_visual_surfaces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capabilities = SimpleNamespace(is_cloud=True, webcam=False, streaming=False, custom_weights=False, device_options=("cpu",), device_default="cpu")
+    app_module, _ = load_app(monkeypatch, capabilities)
+    fake_streamlit = MagicMock(); fake_streamlit.__enter__.return_value = fake_streamlit; fake_streamlit.__exit__.return_value = False; fake_streamlit.columns.side_effect = lambda spec: [fake_streamlit] * (len(spec) if isinstance(spec, list) else spec)
+    fake_streamlit.expander.return_value = fake_streamlit
+    fake_streamlit.session_state = {"annotated_frames": {}}
+    monkeypatch.setattr(app_module, "st", fake_streamlit)
+    df = pd.DataFrame([{"model": "YOLO11n", "family": "YOLO", "latency_mean_ms": 10.0, "latency_p95_ms": 12.0, "fps_effective": 100.0, "gflops_approx": 1.0, "parameters_millions": 2.0, "recognized_classes": "person", "top_detection": "person", "avg_confidence": 0.9, "input_size_px": 32, "detections_mean": 1.0}])
+    app_module.render_benchmark_results(df, "/tmp/results.csv", True); app_module.render_config_summary([], "Demo image", "cpu", 32, 1, 1, True); app_module.render_benchmark_focus(32, False, "CNN vs YOLO comparison"); app_module.render_result_interpretation(df); app_module.render_live_yolo_results(df, "/tmp/results.csv")
+    table = fake_streamlit.dataframe.call_args_list[0].args[0]
+    chart_titles = [call.args[0].layout.title.text for call in fake_streamlit.plotly_chart.call_args_list]
+    rendered = " ".join(str(call.args[0]) for call in fake_streamlit.markdown.call_args_list)
+    labels = [call.args[0] for call in fake_streamlit.metric.call_args_list + fake_streamlit.download_button.call_args_list]
+    assert {"Model", "Family", "Mean latency (ms)", "Recognized classes"} <= set(table.columns) and {"Lowest mean latency", "Highest effective FPS", "Mean latency", "Mean inference", "Processed frames"} <= set(labels) and chart_titles == ["Latency by model", "Effective FPS", "Computational complexity vs runtime"] and all(surface in rendered for surface in ("Recognition by model", "Current configuration", "What to look for", "Interpretation for teaching", "Practical live YOLO summary")) and "Download benchmark CSV" in labels
