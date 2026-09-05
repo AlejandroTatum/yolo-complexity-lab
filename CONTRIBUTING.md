@@ -25,6 +25,18 @@ git push -u origin feat/nombre-corto
 
 Luego abrir un Pull Request.
 
+## Verificación antes de abrir PR
+
+CI corre esto mismo en Python 3.11–3.13 (ver `.github/workflows/ci.yml`):
+
+```bash
+.venv/bin/python scripts/smoke_check.py            # contratos estáticos
+.venv/bin/python scripts/smoke_check.py --server   # arranque de Streamlit + /healthz
+.venv/bin/pytest -q                                # suite completa
+```
+
+Si tocaste la UI (`app.py`, `.streamlit/config.toml`), actualizá también `docs/VISUAL_GUIDE.md` y los screenshots de `docs/screenshots/` si el layout cambió.
+
 ## Qué NO subir
 
 - `.venv/`

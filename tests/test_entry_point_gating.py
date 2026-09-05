@@ -39,7 +39,7 @@ def load_app(
     def selectbox(label: str, options, index: int = 0, **_: object):
         values = tuple(options)
         widgets.append((label, values))
-        if label == "Frame source" and source_kind is not None:
+        if label == "Fuente de frames" and source_kind is not None:
             return source_kind
         return values[index]
 
@@ -76,7 +76,7 @@ def test_empty_standard_source_does_not_consume_notice_before_real_first_load(
     monkeypatch.setattr(streamlit, "warning", lambda message: events.append(("warning", str(message))))
 
     with pytest.raises(BenchmarkStopped):
-        load_app(monkeypatch, capabilities, run=True, source_kind="Upload image", session_state=state)
+        load_app(monkeypatch, capabilities, run=True, source_kind="Subir imagen", session_state=state)
 
     assert "cold_start_notice_shown" not in state
     assert not load_calls
@@ -93,9 +93,9 @@ def test_empty_standard_source_does_not_consume_notice_before_real_first_load(
     monkeypatch.setattr(sources_module, "repeat_frame", lambda value, count: [value] * count)
     monkeypatch.setattr(exporting_module, "write_results_csv", lambda _df: tmp_path / "results.csv")
 
-    load_app(monkeypatch, capabilities, run=True, source_kind="Person/dog/fruit demo", session_state=state)
+    load_app(monkeypatch, capabilities, run=True, source_kind="Demo persona/perro/fruta", session_state=state)
 
-    cold_start_events = [event for event in events if "weights download" in event[1]]
+    cold_start_events = [event for event in events if "se descargan los pesos" in event[1]]
     assert len(cold_start_events) == 1
     assert load_calls
     assert events.index(cold_start_events[0]) < next(index for index, event in enumerate(events) if event[0] == "load")
@@ -139,14 +139,14 @@ def test_app_renders_environment_gated_routes_sources_and_devices(
     local_app, local_widgets = load_app(monkeypatch, local)
     cloud_app, cloud_widgets = load_app(monkeypatch, cloud)
 
-    assert set(local_app.PRESET_MODELS) == {"YOLO live", "CNN vs YOLO comparison", "Custom weights"}
-    assert set(cloud_app.PRESET_MODELS) == {"CNN vs YOLO comparison"}
-    local_source = next(options for label, options in local_widgets if label == "Frame source")
-    cloud_source = next(options for label, options in cloud_widgets if label == "Frame source")
-    assert "Local OpenCV webcam" in local_source
-    assert "Local OpenCV webcam" not in cloud_source
-    assert next(options for label, options in local_widgets if label == "Execution device") == ("auto", "cpu")
-    assert next(options for label, options in cloud_widgets if label == "Execution device") == ("cpu",)
+    assert set(local_app.PRESET_MODELS) == {"YOLO en vivo", "Comparación CNN vs YOLO", "Pesos personalizados"}
+    assert set(cloud_app.PRESET_MODELS) == {"Comparación CNN vs YOLO"}
+    local_source = next(options for label, options in local_widgets if label == "Fuente de frames")
+    cloud_source = next(options for label, options in cloud_widgets if label == "Fuente de frames")
+    assert "Webcam local (OpenCV)" in local_source
+    assert "Webcam local (OpenCV)" not in cloud_source
+    assert next(options for label, options in local_widgets if label == "Dispositivo") == ("auto", "cpu")
+    assert next(options for label, options in cloud_widgets if label == "Dispositivo") == ("cpu",)
 
 
 def test_failed_webcam_open_releases_capture(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -186,7 +186,7 @@ def test_failed_webcam_open_releases_capture(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result == {}
     assert capture.release_calls == 1
-    assert errors == ["Unable to open webcam index 7. Check permissions, connection, and camera availability."]
+    assert errors == ["No se pudo abrir la webcam índice 7. Revisá permisos, conexión y disponibilidad de la cámara."]
 
 
 def test_operational_states_are_actionable_and_cold_start_is_scoped(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -200,9 +200,9 @@ def test_operational_states_are_actionable_and_cold_start_is_scoped(monkeypatch:
     app_module.render_cold_start_notice()
 
     assert fake_streamlit.info.call_count == 1
-    assert "weights download" in fake_streamlit.info.call_args.args[0]
+    assert "se descargan los pesos" in fake_streamlit.info.call_args.args[0]
     app_module.render_benchmark_results(pd.DataFrame())
-    assert "No benchmark evidence is available yet" in fake_streamlit.info.call_args.args[0]
+    assert "Todavía no hay evidencia de benchmark" in fake_streamlit.info.call_args.args[0]
     for state, renderer in (("empty", fake_streamlit.info), ("partial", fake_streamlit.warning), ("failure", fake_streamlit.error), ("active_stream", fake_streamlit.info)):
         app_module.render_operational_state(state, "Recovery detail.")
         assert "Recovery detail." in renderer.call_args.args[0]
@@ -246,7 +246,7 @@ def test_streaming_read_failure_is_bounded_and_actionable(monkeypatch: pytest.Mo
 
     assert result == {}
     assert capture.release_calls == 1
-    assert any("stopped providing frames" in message for message in errors)
+    assert any("dejó de entregar frames" in message for message in errors)
 
 
 def test_streaming_predict_failures_are_bounded_and_cleaned_up(
@@ -320,7 +320,7 @@ def test_streaming_predict_failures_are_bounded_and_cleaned_up(
     assert model.predict_calls == 3
     assert capture.read_calls == 3
     assert capture.release_calls == 1
-    assert any("repeated frame errors" in message for message in errors)
+    assert any("errores repetidos de frame" in message for message in errors)
     assert len(warnings) == 3
     assert fake_streamlit.session_state["streaming_active"] is False
     assert fake_streamlit.session_state["stream_stop_requested"] is False
@@ -339,8 +339,8 @@ def test_download_labels_identify_complete_and_live_exports(monkeypatch: pytest.
     app_module.render_live_yolo_results(results, "/tmp/live.csv", presentation_mode=True)
 
     labels = [call.args[0] for call in fake_streamlit.download_button.call_args_list]
-    assert "Download benchmark results CSV" in labels
-    assert "Download summary CSV" in labels
+    assert "Descargar CSV de resultados" in labels
+    assert "Descargar CSV del resumen" in labels
     assert fake_streamlit.download_button.call_args_list[-1].kwargs["file_name"] == "yolo_live_summary.csv"
 
 
@@ -375,33 +375,33 @@ def test_partial_benchmark_preserves_successes_and_explains_recovery(
     app_module, _ = load_app(monkeypatch, capabilities, run=True)
 
     assert app_module.st.session_state["last_benchmark_df"].shape[0] == 2
-    assert any("weights unavailable" in message and "retry" in message for message in errors)
-    assert any("Partial results are available" in message and "2 of 3" in message for message in warnings)
-    assert sum("weights download" in message for message in infos) == 1
+    assert any("weights unavailable" in message and "reintentá" in message for message in errors)
+    assert any("resultados parciales disponibles" in message and "2 de 3" in message for message in warnings)
+    assert sum("se descargan los pesos" in message for message in infos) == 1
 
 
-def test_reachable_live_results_render_english_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reachable_live_results_render_spanish_copy(monkeypatch: pytest.MonkeyPatch) -> None:
     capabilities = SimpleNamespace(is_cloud=True, webcam=False, streaming=False, custom_weights=False, device_options=("cpu",), device_default="cpu"); app_module, _ = load_app(monkeypatch, capabilities)
     fake_streamlit = MagicMock(); fake_streamlit.columns.side_effect = lambda count: [MagicMock() for _ in range(count)]; monkeypatch.setattr(app_module, "st", fake_streamlit)
     results = pd.DataFrame([{"model": "YOLO", "latency_mean_ms": 20.0, "fps_effective": 50.0, "detections_mean": 2.0, "gflops_approx": 2.0, "parameters_millions": 1.5, "frames_measured": 4, "inference_mean_ms": 12.0, "latency_p95_ms": 25.0}]); app_module.render_live_yolo_results(results, "/tmp/benchmark.csv")
-    rendered = " ".join(str(call.args[0]) for call in fake_streamlit.markdown.call_args_list); assert "Practical YOLO live summary" in rendered; assert "Resumen práctico" not in rendered
+    rendered = " ".join(str(call.args[0]) for call in fake_streamlit.markdown.call_args_list); assert "Resumen en vivo de YOLO11n" in rendered; assert "Practical YOLO live summary" not in rendered
 
-def test_streaming_success_preserves_english_result_export_and_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_streaming_success_preserves_result_export_and_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from yolo_complexity_lab import exporting as exporting_module, loaders as loaders_module; capabilities = SimpleNamespace(is_cloud=False, webcam=True, streaming=True, custom_weights=False, device_options=("cpu",), device_default="cpu"); frame = np.zeros((2, 2, 3), dtype=np.uint8); releases: list[bool] = []; visible: list[str] = []
     capture = SimpleNamespace(isOpened=lambda: True, read=lambda: (True, frame), release=lambda: releases.append(True)); fake_cv2 = SimpleNamespace(VideoCapture=lambda _: capture, resize=lambda *_args, **_kwargs: frame, cvtColor=lambda *_: frame, INTER_LINEAR=0, COLOR_BGR2RGB=0)
     prediction = SimpleNamespace(boxes=[], names={}, speed={"preprocess": 1.0, "inference": 2.0, "postprocess": 1.0}, plot=lambda: frame); loaded = SimpleNamespace(spec=SimpleNamespace(key="yolo11n", backend="ultralytics"), model=SimpleNamespace(predict=lambda **_: [prediction]), device="cpu", parameter_count=1000, model_size_mb=1.0, size_note="fake")
     writer_path = tmp_path / "stream.csv"; written: list[pd.DataFrame] = []; writer = lambda df: (written.append(df.copy()), df.to_csv(writer_path, index=False), writer_path)[-1]
     placeholders = [MagicMock() for _ in range(3)]; placeholders[2].columns.return_value = [MagicMock(), MagicMock()]; placeholders[2].columns.return_value[1].button.return_value = False; placeholders[1].download_button.side_effect = lambda label, *_args, **_kwargs: (visible.append(str(label)), streamlit.session_state.__setitem__("stream_stop_requested", True))[-1]
     for name in ("info", "success", "warning", "error", "markdown", "write", "metric"): monkeypatch.setattr(streamlit, name, lambda *args, **_kwargs: visible.extend(map(str, args)))
-    monkeypatch.setattr(streamlit, "checkbox", lambda label, **_: label == "Live streaming mode"); monkeypatch.setattr(streamlit, "empty", MagicMock(side_effect=placeholders)); monkeypatch.setitem(sys.modules, "cv2", fake_cv2); monkeypatch.setattr(loaders_module, "load_model", lambda *_: loaded); monkeypatch.setattr(exporting_module, "write_results_csv", writer)
-    app_module, _ = load_app(monkeypatch, capabilities, run=True); result = app_module.st.session_state["last_benchmark_df"]; assert releases == [True]; assert result.iloc[0]["frames_measured"] == 1; assert result.iloc[0]["model"] == "YOLO11n — ligero"; assert written[0].equals(result); assert writer_path.read_text().startswith("model_key,"); assert app_module.st.session_state["last_benchmark_csv_path"] == str(writer_path); assert any("Live streaming: YOLO11n" in text for text in visible); assert "Streaming finished. Performance summary:" in visible; assert "Download partial CSV" in visible; assert all(label in visible for label in ("Average latency", "Effective FPS", "Measured frames", "Average detections", "Preprocessing", "Inference")); assert not any("Resumen" in text for text in visible)
-def test_standard_benchmark_results_render_english_surfaces(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(streamlit, "checkbox", lambda label, **_: label == "Modo en vivo"); monkeypatch.setattr(streamlit, "empty", MagicMock(side_effect=placeholders)); monkeypatch.setitem(sys.modules, "cv2", fake_cv2); monkeypatch.setattr(loaders_module, "load_model", lambda *_: loaded); monkeypatch.setattr(exporting_module, "write_results_csv", writer)
+    app_module, _ = load_app(monkeypatch, capabilities, run=True); result = app_module.st.session_state["last_benchmark_df"]; assert releases == [True]; assert result.iloc[0]["frames_measured"] == 1; assert result.iloc[0]["model"] == "YOLO11n — ligero"; assert written[0].equals(result); assert writer_path.read_text().startswith("model_key,"); assert app_module.st.session_state["last_benchmark_csv_path"] == str(writer_path); assert any("En vivo: YOLO11n" in text for text in visible); assert "Streaming finalizado. Resumen de rendimiento:" in visible; assert "Descargar CSV parcial" in visible; assert all(label in visible for label in ("Latencia media", "FPS efectivo", "Frames medidos", "Detecciones promedio", "Preprocesamiento", "Inferencia")); assert not any("Performance summary" in text for text in visible)
+def test_standard_benchmark_results_render_spanish_surfaces(monkeypatch: pytest.MonkeyPatch) -> None:
     capabilities = SimpleNamespace(is_cloud=True, webcam=False, streaming=False, custom_weights=False, device_options=("cpu",), device_default="cpu"); app_module, _ = load_app(monkeypatch, capabilities)
     fake_streamlit = MagicMock(); fake_streamlit.columns.side_effect = lambda count: [MagicMock() for _ in range(count)]; fake_streamlit.session_state = {}; monkeypatch.setattr(app_module, "st", fake_streamlit)
     results = pd.DataFrame([{"model": "YOLO", "family": "YOLO", "latency_mean_ms": 20.0, "fps_effective": 50.0, "gflops_approx": 2.0, "parameters_millions": 1.5, "detections_mean": 2.0}]); app_module.render_benchmark_results(results, presentation_mode=True)
-    rendered = " ".join(str(call.args[0]) for call in fake_streamlit.markdown.call_args_list); assert "Comparative summary" in rendered; assert fake_streamlit.plotly_chart.call_args.args[0].layout.xaxis.title.text == "Approximate GFLOPs"
+    rendered = " ".join(str(call.args[0]) for call in fake_streamlit.markdown.call_args_list); assert "Resumen comparativo" in rendered; assert fake_streamlit.plotly_chart.call_args.args[0].layout.xaxis.title.text == "GFLOPs aproximados"
     app_module.render_config_summary(["yolo11n"], "Person/dog/fruit demo", "cpu", 416, 3, 20, True); app_module.render_benchmark_focus(416, True, "YOLO live"); app_module.render_result_interpretation(results); rendered = " ".join(str(call.args[0]) for call in fake_streamlit.markdown.call_args_list)
-    assert "Current configuration" in rendered and "Interpretation" in rendered and "What to watch" in rendered and "YOLO live" in rendered and "Lo que tenés" not in rendered
+    assert "Configuración actual" in rendered and "Interpretación" in rendered and "Qué observar" in rendered and "YOLO en vivo" in rendered and "What to watch" not in rendered
 
 
 def test_cloud_benchmark_preserves_session_and_csv_flow(
@@ -428,14 +428,14 @@ def test_cloud_benchmark_preserves_session_and_csv_flow(
 
     app_module, _ = load_app(monkeypatch, cloud, run=True)
 
-    assert [key for key, _, _ in calls] == app_module.PRESET_MODELS["CNN vs YOLO comparison"]
+    assert [key for key, _, _ in calls] == app_module.PRESET_MODELS["Comparación CNN vs YOLO"]
     assert all(frames for _, frames, _ in calls)
     assert all(config.measure_frames == 20 and config.warmup_frames == 3 for _, _, config in calls)
     assert app_module.st.session_state["last_benchmark_df"].shape[0] == len(calls)
     assert app_module.st.session_state["last_benchmark_csv_path"] == str(tmp_path / "results.csv")
     assert list(app_module.st.session_state["last_benchmark_df"]["model"]) == [
         streamlit_app_model.display_name for streamlit_app_model in [
-            catalog_module.MODEL_CATALOG[key] for key in app_module.PRESET_MODELS["CNN vs YOLO comparison"]
+            catalog_module.MODEL_CATALOG[key] for key in app_module.PRESET_MODELS["Comparación CNN vs YOLO"]
         ]
     ]
 
@@ -475,11 +475,11 @@ def test_comparison_winner_deltas_preserve_benchmark_rows(
     app_module.render_comparison_presentation(results)
 
     rendered = " ".join(str(call.args[0]) for call in fake_streamlit.markdown.call_args_list)
-    assert "Measured comparison" in rendered
-    assert "Measured conclusion" in rendered
-    assert metric_columns[0].metric.call_args.args[2] == "50.0% lower than next model"
-    assert metric_columns[1].metric.call_args.args[2] == "100.0% higher than next model"
-    assert metric_columns[2].metric.call_args.args[2] == "50.0% lower than next model"
+    assert "Comparación medida" in rendered
+    assert "Conclusión medida" in rendered
+    assert metric_columns[0].metric.call_args.args[2] == "50.0% menor que el siguiente modelo"
+    assert metric_columns[1].metric.call_args.args[2] == "100.0% mayor que el siguiente modelo"
+    assert metric_columns[2].metric.call_args.args[2] == "50.0% menor que el siguiente modelo"
 
 
 def test_single_model_conclusion_does_not_claim_comparison_lead(
@@ -504,7 +504,7 @@ def test_single_model_conclusion_does_not_claim_comparison_lead(
     app_module.render_comparison_presentation(results)
 
     rendered = " ".join(str(call.args[0]) for call in fake_streamlit.markdown.call_args_list)
-    assert "Only one model was measured: YOLO." in rendered
+    assert "Solo se midió un modelo: YOLO." in rendered
     assert "leads this measured comparison" not in rendered
 
 
@@ -528,13 +528,13 @@ def test_navigation_shell_orders_tabs_and_exposes_author_and_evidence_path(
         lambda labels: tab_calls.append(tuple(labels)) or ("overview", "benchmark", "about"),
     )
     assert app_module.render_navigation_tabs() == ("overview", "benchmark", "about")
-    assert tab_calls == [("Overview", "Benchmark", "About")]
+    assert tab_calls == [("Resumen", "Benchmark", "Acerca de")]
 
     fake_streamlit = MagicMock()
     monkeypatch.setattr(app_module, "st", fake_streamlit)
-    app_module.render_hero(True)
+    app_module.render_commercial_header()
     app_module.render_evidence_path()
 
     rendered = " ".join(str(call.args[0]) for call in fake_streamlit.markdown.call_args_list)
-    assert "Built by Alejandro Padilla" in rendered
-    assert "Evidence is unavailable" in str(fake_streamlit.info.call_args.args[0])
+    assert "YOLO Complexity Lab" in rendered and app_module.AUTHOR_NAME == "Alejandro Padilla"
+    assert "La evidencia no está disponible" in str(fake_streamlit.info.call_args.args[0])

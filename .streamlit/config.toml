@@ -1,10 +1,60 @@
-[theme]
-base = "light"
-primaryColor = "#2563eb"
-backgroundColor = "#f8fbff"
-secondaryBackgroundColor = "#ffffff"
-textColor = "#172033"
-font = "sans serif"
-
+# Tema "tailwind" (awesome-streamlit-themes, MIT) adaptado al lab.
+# Requiere Streamlit >= 1.50 para theme.fontFaces.
 [server]
 headless = true
+enableStaticServing = true
+
+[[theme.fontFaces]]
+family = "Inter"
+url = "app/static/Inter_18pt-Regular.ttf"
+style = "normal"
+weight = 400
+
+[[theme.fontFaces]]
+family = "Inter"
+url = "app/static/Inter_18pt-Medium.ttf"
+style = "normal"
+weight = 500
+
+[[theme.fontFaces]]
+family = "Inter"
+url = "app/static/Inter_18pt-SemiBold.ttf"
+style = "normal"
+weight = 600
+
+[[theme.fontFaces]]
+family = "Inter"
+url = "app/static/Inter_18pt-Bold.ttf"
+style = "normal"
+weight = 700
+
+[[theme.fontFaces]]
+family = "JetBrainsMono"
+url = "app/static/JetBrainsMono-Regular.ttf"
+style = "normal"
+weight = 400
+
+[[theme.fontFaces]]
+family = "JetBrainsMono"
+url = "app/static/JetBrainsMono-Medium.ttf"
+style = "normal"
+weight = 500
+
+[theme]
+primaryColor = "#3b82f6"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f8fafc"
+textColor = "#0f172a"
+linkColor = "#2563eb"
+borderColor = "#e2e8f0"
+showWidgetBorder = true
+baseRadius = "0.5rem"
+font = "Inter"
+headingFont = "Inter"
+codeFont = "JetBrainsMono"
+codeBackgroundColor = "#f1f5f9"
+showSidebarBorder = true
+
+[theme.sidebar]
+backgroundColor = "#f8fafc"
+secondaryBackgroundColor = "#f1f5f9"

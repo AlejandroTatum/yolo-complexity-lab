@@ -17,3 +17,7 @@ annotations/
 
 # CodeGraph local index
 .codegraph/
+
+# Local test virtualenv and generated results
+.venv-test/
+outputs/

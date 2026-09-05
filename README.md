@@ -1,58 +1,50 @@
 # YOLO Complexity Lab
 
-Laboratorio académico local en Streamlit para explicar **YOLO en tiempo real** y comparar **tiempo de ejecución** y **complejidad computacional** frente a detectores CNN clásicos.
+[![CI](https://github.com/AlejandroTatum/yolo-complexity-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/AlejandroTatum/yolo-complexity-lab/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://github.com/AlejandroTatum/yolo-complexity-lab)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Built with Streamlit](https://img.shields.io/badge/built%20with-Streamlit-FF4B4B)](https://streamlit.io)
 
-## Enfoque
+**English** | [Español](README.es.md)
 
-El recurso no intenta demostrar mAP (Mean Average Precision). El foco de la exposición es:
+A local-first Streamlit lab that runs **YOLO in real time** and compares **runtime** and **computational complexity** against classic CNN detectors. Built as a portfolio experiment for a university computational-complexity course.
 
-1. Mostrar **YOLO actual en vivo** con webcam local.
-2. Comparar **Faster R-CNN / SSDlite / YOLO11n** con el mismo input.
-3. Explicar tiempo y complejidad usando `n = H × W`.
+🔗 **Live demo:** [yolo-complexity-lab-unl.streamlit.app](https://yolo-complexity-lab-unl.streamlit.app/)
 
-Métricas principales:
+![YOLO Complexity Lab overview](docs/screenshots/overview.png)
 
-- Latencia media y p95.
-- FPS efectivo.
-- `n = H × W` como tamaño de entrada.
-- MACs/GFLOPs aproximados.
-- Parámetros del modelo.
-- Clases reconocidas como apoyo visual, no como métrica formal de precisión.
+## Why
 
-## Modelos incluidos
+Object detection has to locate and classify many objects per image. The YOLO-versus-CNN question is whether a **single pass** over the image reduces runtime cost. This lab turns that theory into a measurable experiment: same input, same settings, different architectures.
 
-- `yolo11n.pt` — YOLO ligero.
-- `yolo11s.pt` — YOLO mediano.
-- `best.pt` — demo local opcional de gestos, si el archivo existe en el repo.
-- `ssdlite320_mobilenet_v3_large` — detector CNN one-stage.
-- `fasterrcnn_mobilenet_v3_large_320_fpn` — detector CNN two-stage.
+The lab does not try to demonstrate mAP. Recognition is a visual aid; the evidence is time and cost.
 
-## Flujo recomendado para la exposición
+## What it measures
 
-1. En el panel lateral dejá seleccionada la ruta **YOLO actual en vivo**.
-2. Abrí la pestaña **Benchmark** y usá **Iniciar YOLO en vivo** para mostrar tiempo real.
-3. Cambiá la ruta a **Comparación CNN vs YOLO**.
-4. Ejecutá la comparación con la imagen demo persona/perro/fruta.
-5. Explicá la conclusión:
-   - con el mismo `n = H×W`, YOLO suele ganar en latencia/FPS;
-   - GFLOPs es un proxy de costo;
-   - el reconocimiento visual ayuda a discutir falsos positivos/falsos negativos.
+| Metric | Meaning |
+| --- | --- |
+| Mean / p95 latency | Time per frame — lower is better |
+| Effective FPS | Real-time throughput — higher is better |
+| `n = H × W` | Input size: the axis complexity grows on |
+| MACs / GFLOPs | Approximate operations per frame (1 MAC ≈ 2 FLOPs) |
+| Parameters | Learned weights: model size, memory, capacity |
+| Recognized classes | Visual aid for the chosen input, not a formal accuracy metric |
 
-## Trabajo en equipo
+## How it works
 
-Si vas a pulir la parte visual/front, empezá por:
+The sidebar offers three comparison routes; unsupported routes are hidden automatically depending on the environment (local vs cloud):
 
-- `app.py` para layout, tabs, textos, métricas y gráficos.
-- `.streamlit/config.toml` para colores/tema global.
-- `docs/VISUAL_GUIDE.md` si quieren documentar nuevas decisiones visuales.
+1. **YOLO en vivo** — stream a local webcam through YOLO11n and watch latency, FPS, and detections update per frame.
+2. **Comparación CNN vs YOLO** — measure `fasterrcnn_mobilenet_v3_large_320_fpn` (two-stage), `ssdlite320_mobilenet_v3_large` (one-stage), and `yolo11n` on the same input, then read the winners chart and export a CSV.
+3. **Pesos personalizados** — run an optional local `best.pt` (e.g. a gesture model) when the file exists at the repository root.
 
-La UI actual usa tema claro, pocas tarjetas, textos cortos y una ruta de benchmark pensada para exposición.
+Frame sources: a bundled person/dog/fruit demo image, your own uploaded photo (processed live), or the local webcam. The Benchmark tab overlays each model's real detections on the input — pick a model chip, mount your own photo, and run.
 
-No subas `.venv/`, pesos `.pt`, videos pesados ni resultados generados. Los pesos YOLO se guardan fuera del repo en `~/.cache/yolo-complexity-lab/weights/`.
+![Benchmark comparison of the three detectors](docs/screenshots/benchmark.png)
 
-## Instalación recomendada
+## Quickstart
 
-> Nota: no instales con `pip` del sistema. Este proyecto ya usa `.venv` para evitar el error `externally-managed-environment`.
+> Use a virtual environment; do not install with the system `pip`.
 
 ```bash
 git clone https://github.com/AlejandroTatum/yolo-complexity-lab.git
@@ -63,66 +55,85 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-En este equipo se validó con `python3.14` dentro de `.venv` y `torch 2.12.0+cu130`.
-
-## Ejecutar
+For a CPU-only setup, install PyTorch first to avoid pulling CUDA wheels:
 
 ```bash
-source .venv/bin/activate
-streamlit run app.py
+python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements.txt
 ```
 
-## Big-O usado
+Run the lab locally (this exposes webcam, streaming, and CUDA choices):
 
-Complejidad convolucional principal:
+```bash
+YOLOLAB_ENV=local streamlit run app.py
+```
+
+Model weights download on first use into `~/.cache/yolo-complexity-lab/weights/`; they stay out of the repository.
+
+## The Big-O behind the lab
+
+Main convolutional cost:
 
 ```text
 O(Σ_l H_l × W_l × C_in_l × C_out_l × K_l²)
 ```
 
-Versión didáctica con `n = H × W`:
+Didactic form with `n = H × W`:
 
 ```text
 O(L × n × C_in × C_out × K²)
 ```
 
-Postprocesamiento con NMS:
+NMS post-processing:
 
 ```text
 O(B²)
 ```
 
-Para detectores two-stage se agrega costo por regiones:
+Two-stage detectors add a per-region cost:
 
 ```text
 O(Σ conv + R × C_roi + NMS)
 ```
 
-## Exportación
-
-Los resultados quedan persistidos en la sesión de Streamlit. Podés descargar CSV sin perder la tabla ni repetir el benchmark.
-
-Los CSV se guardan automáticamente en:
+## Project structure
 
 ```text
-outputs/university/complejidad-computacional/PROYECTO001_YOLO_COMPLEXITY_LAB_Alejandro_Padilla/results/
+.
+├── app.py                      # Streamlit UI: layout, tabs, charts, CSS
+├── src/yolo_complexity_lab/    # benchmark, catalog, loaders, complexity, system info
+├── scripts/smoke_check.py      # static + server smoke checks
+├── tests/                      # pytest suite
+├── assets/                     # demo image (person/dog/fruit)
+├── docs/                       # visual guide + screenshots
+└── .streamlit/config.toml      # global theme
 ```
 
-## Validación rápida sin dependencias pesadas
+## Testing and CI
 
 ```bash
-python3 scripts/smoke_check.py
+.venv/bin/python scripts/smoke_check.py            # static contracts
+.venv/bin/python scripts/smoke_check.py --server   # boots Streamlit, probes /healthz and /
+.venv/bin/pytest -q                                # full test suite
 ```
 
-## Estado del proyecto
+GitHub Actions runs the smoke checks and the test suite on Python 3.11–3.13 for every pull request.
 
-Proyecto académico preparado para demostraciones locales. Las métricas dependen del hardware y del entorno de ejecución; no representan una evaluación formal de precisión entre modelos.
+## Deployment
 
-## Assets de demo
+The app deploys to Streamlit Community Cloud with `app.py` as the main file. Unknown (unset `YOLOLAB_ENV`) and `YOLOLAB_ENV=cloud` environments use a restricted capability contract: webcam routes are hidden and only the CPU device is offered. See [DEPLOY.md](DEPLOY.md) for the full guide and recovery playbook.
 
-La imagen local `assets/demo_person_dog_fruit.jpg` combina:
+## Roadmap
 
-- `zidane.jpg`, asset de ejemplo incluido con Ultralytics.
-- Foto de perro con banana de Karsten Winegeart en Unsplash (`de5wBys0nok`).
+- [ ] Light/dark theme toggle for different rooms and projectors
+- [ ] Small mAP-style quantitative evaluation on a fixed dataset
+- [ ] Video-file source in addition to image and webcam
+- [ ] Side-by-side multi-model live comparison
 
-Se usa solo como lámina didáctica local para comparar reconocimiento, falsos positivos y tiempos.
+## Credits
+
+The bundled demo image combines `zidane.jpg` (Ultralytics sample asset) and a dog-with-banana photo by Karsten Winegeart on Unsplash (`de5wBys0nok`). It is used purely as a didactic slide for comparing recognition, false positives, and timing.
+
+## License
+
+[MIT](LICENSE)
